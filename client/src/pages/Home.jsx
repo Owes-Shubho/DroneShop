@@ -21,6 +21,11 @@ export default function Home() {
         <Link to="/shop" className="btn">Shop all drones</Link>
       </section>
 
+      <div className="promo">
+        <strong>Free shipping on orders over $500</strong>
+        <span>Applied automatically at checkout</span>
+      </div>
+
       <h2>Browse by category</h2>
       <div className="cats">
         {categories.map((c) => (
