@@ -59,7 +59,8 @@ export default function ProductPage() {
                   <option key={i} value={i + 1}>{i + 1}</option>
                 ))}
               </select>
-              <button className="btn" onClick={() => { add(p, qty); nav('/cart'); }}>Add to cart</button>
+              <button className="btn tint" onClick={() => add(p, qty)}>Add to cart</button>
+              <button className="btn store" onClick={() => { add(p, qty); nav('/cart'); }}>Buy now</button>
               <small className="muted">{p.countInStock} in stock</small>
             </div>
           ) : <span className="badge out">Out of stock</span>}

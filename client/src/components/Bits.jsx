@@ -36,7 +36,7 @@ export function ProductCard({ p }) {
         <DroneImage src={p.image} name={p.name} />
       </Link>
       <div className="card-body">
-        <small className="muted">{p.brand} · {p.category}</small>
+        <small className="eyebrow">{p.category}</small>
         <Link to={`/product/${p._id}`} className="card-title">{p.name}</Link>
         <Stars value={p.rating} />
         <div className="row between">
