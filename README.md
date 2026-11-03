@@ -38,3 +38,18 @@ npm run client   # App on http://localhost:5173
 | `POST /api/products/:id/reviews` | user |
 | `POST /api/orders`, `GET /api/orders/mine`, `GET /api/orders/:id` | user |
 | `GET /api/orders`, `PUT /api/orders/:id/status` | admin |
+
+## More features
+- Accounts: profile, change/reset password, saved addresses, wishlist
+- Checkout: coupon codes, server-calculated totals, order cancel while processing, tracking numbers, printable invoice
+- Admin (`/admin`): overview, products with image upload, orders and shipments, coupons, customers, CSV export
+- Static pages (About, Shipping, Returns, Privacy, Terms, Contact) — **starter text, review before launch**
+
+## Email
+Set `SMTP_*` and `MAIL_FROM` in `server/.env` to send real email. Without them, emails (order confirmation, shipped, password reset) are printed to the server console.
+
+## Tests
+```bash
+npm test --prefix server
+```
+Runs against a separate database (`droneshop_test`, override with `MONGO_URI_TEST`; the name must end in `_test` because the tests wipe it).

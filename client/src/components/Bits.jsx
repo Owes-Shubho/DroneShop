@@ -2,17 +2,15 @@ import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { money } from '../api.js';
+import { Drone, Heart } from './Icons.jsx';
+import { useWishlist } from '../context/WishlistContext.jsx';
+import { useNavigate } from 'react-router-dom';
 
 export function DroneImage({ src, name }) {
-  if (src) return <img className="pimg" src={src} alt={name} />;
+  if (src) return <img className="pimg" src={src} alt={name} loading="lazy" />;
   return (
     <div className="pimg placeholder" role="img" aria-label={name}>
-      <svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <circle cx="12" cy="14" r="7" /><circle cx="52" cy="14" r="7" />
-        <circle cx="12" cy="50" r="7" /><circle cx="52" cy="50" r="7" />
-        <path d="M17 19l10 8M47 19L37 27M17 45l10-8M47 45L37 37" />
-        <rect x="26" y="26" width="12" height="12" rx="3" />
-      </svg>
+      <Drone width={56} height={56} strokeWidth={1.5} />
     </div>
   );
 }
@@ -30,22 +28,33 @@ export function Stars({ value = 0, count }) {
 
 export function ProductCard({ p }) {
   const { add } = useCart();
+  const wish = useWishlist();
+  const nav = useNavigate();
+  const saved = wish.has(p._id);
+  const out = p.countInStock === 0;
+  const low = !out && p.countInStock <= 5;
   return (
     <div className="card">
-      <Link to={`/product/${p._id}`}>
+      <Link to={`/product/${p._id}`} className="card-media">
+        {out && <span className="tag out">Out of stock</span>}
+        {low && <span className="tag warn">Only {p.countInStock} left</span>}
         <DroneImage src={p.image} name={p.name} />
       </Link>
+      <button
+        className={`heart ${saved ? 'on' : ''}`}
+        aria-pressed={saved}
+        aria-label={saved ? `Remove ${p.name} from wishlist` : `Save ${p.name} to wishlist`}
+        onClick={async () => { if (!(await wish.toggle(p._id))) nav('/login'); }}
+      >
+        <Heart width={18} height={18} fill={saved ? 'currentColor' : 'none'} />
+      </button>
       <div className="card-body">
-        <small className="eyebrow">{p.category}</small>
+        <span className="eyebrow-sm">{p.brand}</span>
         <Link to={`/product/${p._id}`} className="card-title">{p.name}</Link>
         <Stars value={p.rating} />
-        <div className="row between">
-          <strong>{money(p.price)}</strong>
-          {p.countInStock > 0 ? (
-            <button className="btn small" onClick={() => add(p)}>Add</button>
-          ) : (
-            <span className="badge out">Out of stock</span>
-          )}
+        <div className="card-foot">
+          <span className="price">{money(p.price)}</span>
+          {!out && <button className="btn tint small" onClick={() => add(p)}>Add to cart</button>}
         </div>
       </div>
     </div>

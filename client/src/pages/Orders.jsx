@@ -3,8 +3,10 @@ import { Link, useParams } from 'react-router-dom';
 import { api, money } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Loader, ErrorMsg } from '../components/Bits.jsx';
+import useTitle from '../useTitle.js';
 
 export function MyOrders() {
+  useTitle('My orders');
   const { user } = useAuth();
   const [orders, setOrders] = useState(null);
   const [error, setError] = useState('');
@@ -43,18 +45,53 @@ export function OrderDetail() {
   const { user } = useAuth();
   const [o, setO] = useState(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useTitle(o ? `Order ${o._id.slice(-8)}` : 'Order');
 
   useEffect(() => {
     api(`/orders/${id}`, { token: user.token }).then(setO).catch((e) => setError(e.message));
   }, [id]);
 
-  if (error) return <ErrorMsg error={error} />;
-  if (!o) return <Loader />;
+  const cancel = async () => {
+    if (!confirm('Cancel this order? This cannot be undone.')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await api(`/orders/${id}/cancel`, { method: 'PUT', token: user.token });
+      setO((cur) => ({ ...cur, ...updated, user: cur.user }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!o) return error ? <ErrorMsg error={error} /> : <Loader />;
   const a = o.shippingAddress;
+  const t = o.tracking;
+  const safeTrackUrl = t?.url && /^https?:\/\//i.test(t.url) ? t.url : null;
+
   return (
     <>
-      <h1>Order {o._id.slice(-8)}</h1>
+      <div className="row between wrap gap">
+        <h1>Order {o._id.slice(-8)}</h1>
+        <div className="row gap">
+          <Link to={`/orders/${o._id}/invoice`} className="btn ghost small">Invoice</Link>
+          {o.status === 'Processing' && o.user?._id === user._id && (
+            <button className="btn ghost small" onClick={cancel} disabled={busy}>Cancel order</button>
+          )}
+        </div>
+      </div>
+      <ErrorMsg error={error} />
       <p><span className={`badge ${o.status}`}>{o.status}</span> · Placed {new Date(o.createdAt).toLocaleString()}</p>
+
+      {t?.number && (
+        <div className="panel tracking">
+          <h3>Tracking</h3>
+          <p>{t.carrier || 'Carrier'} — <strong>{t.number}</strong>{safeTrackUrl && <> · <a href={safeTrackUrl} target="_blank" rel="noopener noreferrer">Track package</a></>}</p>
+        </div>
+      )}
+
       <div className="cart">
         <div>
           <h3>Ship to</h3>
@@ -71,9 +108,10 @@ export function OrderDetail() {
         </div>
         <div className="summary">
           <div className="row between"><span>Items</span><span>{money(o.itemsPrice)}</span></div>
-          <div className="row between"><span>Shipping</span><span>{money(o.shippingPrice)}</span></div>
+          {o.discountPrice > 0 && <div className="row between ok"><span>Discount{o.coupon?.code ? ` (${o.coupon.code})` : ''}</span><span>−{money(o.discountPrice)}</span></div>}
+          <div className="row between"><span>Shipping</span><span>{o.shippingPrice ? money(o.shippingPrice) : 'Free'}</span></div>
           <div className="row between"><span>Tax</span><span>{money(o.taxPrice)}</span></div>
-          <div className="row between"><strong>Total</strong><strong>{money(o.totalPrice)}</strong></div>
+          <div className="row between big-row"><strong>Total</strong><strong>{money(o.totalPrice)}</strong></div>
         </div>
       </div>
     </>

@@ -11,10 +11,16 @@ export function CartProvider({ children }) {
       return [];
     }
   });
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => localStorage.setItem('cart', JSON.stringify(items)), [items]);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
-  const add = (p, qty = 1) =>
+  const add = (p, qty = 1) => {
     setItems((prev) => {
       const found = prev.find((i) => i.product === p._id);
       if (found) {
@@ -27,6 +33,8 @@ export function CartProvider({ children }) {
         { product: p._id, name: p.name, image: p.image, price: p.price, countInStock: p.countInStock, qty },
       ];
     });
+    setNotice({ id: Date.now(), name: p.name });
+  };
   const setQty = (id, qty) =>
     setItems((prev) => prev.map((i) => (i.product === id ? { ...i, qty } : i)));
   const remove = (id) => setItems((prev) => prev.filter((i) => i.product !== id));
@@ -36,7 +44,7 @@ export function CartProvider({ children }) {
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);
 
   return (
-    <CartContext.Provider value={{ items, add, setQty, remove, clear, count, subtotal }}>
+    <CartContext.Provider value={{ items, add, setQty, remove, clear, count, subtotal, notice }}>
       {children}
     </CartContext.Provider>
   );

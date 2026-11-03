@@ -1,24 +1,30 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, money } from '../api.js';
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useWishlist } from '../context/WishlistContext.jsx';
 import { DroneImage, Stars, Loader, ErrorMsg } from '../components/Bits.jsx';
+import { Check, Heart } from '../components/Icons.jsx';
+import useTitle from '../useTitle.js';
 
 export default function ProductPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const { add } = useCart();
   const { user } = useAuth();
+  const wish = useWishlist();
   const [p, setP] = useState(null);
   const [qty, setQty] = useState(1);
+  const [shown, setShown] = useState(0);
   const [error, setError] = useState('');
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [reviewError, setReviewError] = useState('');
+  useTitle(p?.name, p && `${p.name} by ${p.brand} — ${p.description}`.slice(0, 155));
 
   const load = () => api(`/products/${id}`).then(setP).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { setShown(0); setQty(1); load(); }, [id]);
 
   const submitReview = async (e) => {
     e.preventDefault();
@@ -32,18 +38,46 @@ export default function ProductPage() {
     }
   };
 
+  const removeReview = async (rid) => {
+    if (!confirm('Remove this review?')) return;
+    try {
+      await api(`/products/${id}/reviews/${rid}`, { method: 'DELETE', token: user.token });
+      load();
+    } catch (err) {
+      setReviewError(err.message);
+    }
+  };
+
+  const heart = async () => {
+    if (!(await wish.toggle(id))) nav('/login');
+  };
+
   if (error) return <ErrorMsg error={error} />;
   if (!p) return <Loader />;
+
+  const gallery = [p.image, ...(p.images || [])].filter(Boolean);
+  const saved = wish.has(p._id);
 
   return (
     <>
       <div className="detail">
-        <DroneImage src={p.image} name={p.name} />
         <div>
-          <small className="muted">{p.brand} · {p.category}</small>
+          <div className="gallery"><DroneImage src={gallery[shown]} name={p.name} /></div>
+          {gallery.length > 1 && (
+            <div className="thumbs">
+              {gallery.map((src, i) => (
+                <button key={src} className={i === shown ? 'on' : ''} onClick={() => setShown(i)} aria-label={`Show image ${i + 1}`}>
+                  <img src={src} alt="" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <span className="eyebrow-sm">{p.brand} · {p.category}</span>
           <h1>{p.name}</h1>
           <Stars value={p.rating} count={p.numReviews} />
-          <h2>{money(p.price)}</h2>
+          <span className="price">{money(p.price)}</span>
           <p>{p.description}</p>
           <table className="specs">
             <tbody>
@@ -53,17 +87,32 @@ export default function ProductPage() {
             </tbody>
           </table>
           {p.countInStock > 0 ? (
-            <div className="row gap">
-              <select value={qty} onChange={(e) => setQty(Number(e.target.value))}>
+            <div className="buybox">
+              <select value={qty} onChange={(e) => setQty(Number(e.target.value))} aria-label="Quantity">
                 {Array.from({ length: Math.min(p.countInStock, 10) }, (_, i) => (
                   <option key={i} value={i + 1}>{i + 1}</option>
                 ))}
               </select>
               <button className="btn tint" onClick={() => add(p, qty)}>Add to cart</button>
-              <button className="btn store" onClick={() => { add(p, qty); nav('/cart'); }}>Buy now</button>
+              <button className="btn" onClick={() => { add(p, qty); nav('/cart'); }}>Buy now</button>
+              <button className={`btn ghost icon-btn ${saved ? 'on' : ''}`} onClick={heart} aria-pressed={saved} aria-label={saved ? 'Remove from wishlist' : 'Add to wishlist'}>
+                <Heart width={18} height={18} fill={saved ? 'currentColor' : 'none'} />
+              </button>
               <small className="muted">{p.countInStock} in stock</small>
             </div>
-          ) : <span className="badge out">Out of stock</span>}
+          ) : (
+            <div className="buybox">
+              <span className="badge out">Out of stock</span>
+              <button className={`btn ghost icon-btn ${saved ? 'on' : ''}`} onClick={heart} aria-pressed={saved} aria-label="Save to wishlist">
+                <Heart width={18} height={18} fill={saved ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+          )}
+          <ul className="perks">
+            <li><Check width={16} height={16} /> Free shipping on orders over $500</li>
+            <li><Check width={16} height={16} /> 30-day returns</li>
+            <li><Check width={16} height={16} /> Secure checkout</li>
+          </ul>
         </div>
       </div>
 
@@ -71,21 +120,24 @@ export default function ProductPage() {
       {p.reviews.length === 0 && <p className="muted">No reviews yet.</p>}
       {p.reviews.map((r) => (
         <div key={r._id} className="review">
-          <strong>{r.name}</strong> <Stars value={r.rating} />
+          <div className="row between">
+            <span><strong>{r.name}</strong> <Stars value={r.rating} /></span>
+            {user?.isAdmin && <button className="link danger" onClick={() => removeReview(r._id)}>Remove</button>}
+          </div>
           <p>{r.comment}</p>
         </div>
       ))}
+      <ErrorMsg error={reviewError} />
       {user ? (
         <form onSubmit={submitReview} className="form">
           <h3>Write a review</h3>
-          <ErrorMsg error={reviewError} />
-          <select value={rating} onChange={(e) => setRating(Number(e.target.value))}>
+          <select value={rating} onChange={(e) => setRating(Number(e.target.value))} aria-label="Rating">
             {[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} stars</option>)}
           </select>
           <textarea required value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Your review" />
           <button className="btn">Submit review</button>
         </form>
-      ) : <p className="muted">Sign in to write a review.</p>}
+      ) : <p className="muted"><Link to="/login">Sign in</Link> to write a review.</p>}
     </>
   );
 }

@@ -13,10 +13,12 @@ export function AuthProvider({ children }) {
     }
   });
 
+  // Stores the signed-in user (including the token) in state and localStorage.
   const save = (u) => {
     setUser(u);
     if (u) localStorage.setItem('user', JSON.stringify(u));
     else localStorage.removeItem('user');
+    return u;
   };
 
   const login = async (email, password) =>
@@ -26,6 +28,6 @@ export function AuthProvider({ children }) {
   const logout = () => save(null);
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, login, register, logout, setSession: save }}>{children}</AuthContext.Provider>
   );
 }

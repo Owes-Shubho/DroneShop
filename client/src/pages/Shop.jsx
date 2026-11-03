@@ -55,7 +55,13 @@ export default function Shop() {
       </aside>
 
       <section>
-        {params.get('search') && <p className="muted">Results for “{params.get('search')}”</p>}
+        <div className="page-head">
+          <h1>{params.get('category') || 'All drones'}</h1>
+          <p className="results">
+            {data ? `${data.total} product${data.total === 1 ? '' : 's'}` : ' '}
+            {params.get('search') && ` for “${params.get('search')}”`}
+          </p>
+        </div>
         <ErrorMsg error={error} />
         {!data && !error && <Loader />}
         {data && (data.products.length === 0 ? <p>No products found.</p> : (

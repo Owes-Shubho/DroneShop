@@ -21,6 +21,7 @@ const productSchema = new mongoose.Schema(
     },
     description: { type: String, required: true },
     image: { type: String, default: '' },
+    images: { type: [String], default: [] }, // extra gallery images; `image` stays the main one
     price: { type: Number, required: true, min: 0 },
     countInStock: { type: Number, required: true, min: 0, default: 0 },
     specs: {

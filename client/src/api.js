@@ -14,3 +14,15 @@ export async function api(path, { method = 'GET', body, token } = {}) {
 
 export const money = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+
+// Downloads an authenticated file (e.g. a CSV export) by fetching it and saving the blob.
+export async function download(path, filename, token) {
+  const res = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || `Download failed (${res.status})`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

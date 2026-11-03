@@ -20,6 +20,11 @@ const orderSchema = new mongoose.Schema(
       country: { type: String, required: true },
     },
     paymentMethod: { type: String, required: true, default: 'Cash on Delivery' },
+    coupon: { code: String, type: { type: String }, value: Number }, // `type` needs the explicit form or Mongoose reads it as the path's own type
+    discountPrice: { type: Number, default: 0 },
+    tracking: { carrier: String, number: String, url: String },
+    shippedAt: Date,
+    cancelledBy: { type: String, enum: ['customer', 'admin'] },
     itemsPrice: { type: Number, required: true },
     shippingPrice: { type: Number, required: true },
     taxPrice: { type: Number, required: true },

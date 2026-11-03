@@ -4,6 +4,12 @@ import { protect, admin } from '../middleware/auth.js';
 
 const router = Router();
 
+// Fields the server manages itself; admins cannot set them through the product form.
+const clean = ({ reviews, rating, numReviews, _id, __v, createdAt, updatedAt, ...data }) => {
+  if (Array.isArray(data.images)) data.images = data.images.filter((u) => typeof u === 'string' && u.trim()).slice(0, 8);
+  return data;
+};
+
 // GET /api/products?search=&category=&minPrice=&maxPrice=&sort=&page=&limit=
 router.get('/', async (req, res, next) => {
   try {
@@ -63,7 +69,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', protect, admin, async (req, res, next) => {
   try {
-    res.status(201).json(await Product.create(req.body));
+    res.status(201).json(await Product.create(clean(req.body)));
   } catch (err) {
     next(err);
   }
@@ -71,8 +77,7 @@ router.post('/', protect, admin, async (req, res, next) => {
 
 router.put('/:id', protect, admin, async (req, res, next) => {
   try {
-    const { reviews, rating, numReviews, ...data } = req.body;
-    const product = await Product.findByIdAndUpdate(req.params.id, data, {
+    const product = await Product.findByIdAndUpdate(req.params.id, clean(req.body), {
       new: true,
       runValidators: true,
     });
@@ -116,6 +121,24 @@ router.post('/:id/reviews', protect, async (req, res, next) => {
     product.rating = product.reviews.reduce((s, r) => s + r.rating, 0) / product.reviews.length;
     await product.save();
     res.status(201).json({ message: 'Review added' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/reviews/:reviewId', protect, admin, async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    const review = product?.reviews.id(req.params.reviewId);
+    if (!review) {
+      res.status(404);
+      throw new Error('Review not found');
+    }
+    review.deleteOne();
+    product.numReviews = product.reviews.length;
+    product.rating = product.reviews.length ? product.reviews.reduce((s, r) => s + r.rating, 0) / product.reviews.length : 0;
+    await product.save();
+    res.json({ message: 'Review removed' });
   } catch (err) {
     next(err);
   }
