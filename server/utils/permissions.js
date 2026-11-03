@@ -1,6 +1,7 @@
 // Roles are fixed in code; each grants a set of permissions. `admin` can do everything.
 export const PERMISSIONS = {
-  dashboard: 'View sales overview and reports',
+  dashboard: 'View the sales overview',
+  reports: 'Run and export sales, product, customer, inventory, coupon and return reports',
   products: 'Manage products, categories, images and reviews',
   orders: 'View and process orders, shipments and returns',
   coupons: 'Manage coupons',
@@ -19,7 +20,7 @@ export const ROLES = {
   manager: {
     label: 'Manager',
     description: 'Runs the catalogue, orders and coupons and sees the sales overview. Cannot manage users.',
-    permissions: ['dashboard', 'products', 'orders', 'coupons', 'users.view'],
+    permissions: ['dashboard', 'reports', 'products', 'orders', 'coupons', 'users.view'],
   },
   admin: { label: 'Admin', description: 'Full access, including users and roles.', permissions: Object.keys(PERMISSIONS) },
 };

@@ -9,10 +9,13 @@ import Order from '../models/Order.js';
 import Coupon from '../models/Coupon.js';
 import Category from '../models/Category.js';
 import { parseCsv } from '../utils/csvParse.js';
+import { csv, sendCsv } from '../utils/csvOut.js';
+import reportRoutes from './reports.js';
 import { protect, staff, requires } from '../middleware/auth.js';
 
 const router = Router();
 router.use(protect, staff);
+router.use('/reports', requires('reports'), reportRoutes);
 
 const LOW_STOCK = 5;
 
@@ -353,18 +356,6 @@ router.delete('/coupons/:id', requires('coupons'), async (req, res, next) => {
 });
 
 // ----- CSV export -----
-// Cells starting with = + - @ are prefixed so spreadsheets do not run them as formulas.
-const cell = (v) => {
-  let t = v === undefined || v === null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
-  return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
-};
-const csv = (header, rows) => [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n');
-const sendCsv = (res, name, body) => {
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
-  res.send('\uFEFF' + body); // BOM so Excel reads UTF-8
-};
 
 router.get('/export/orders.csv', requires('orders'), async (req, res, next) => {
   try {

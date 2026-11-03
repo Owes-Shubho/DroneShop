@@ -5,6 +5,7 @@ import Overview from './Overview.jsx';
 // [path, label, permission required, exact match]
 export const links = [
   ['/admin', 'Overview', 'dashboard', true],
+  ['/admin/reports', 'Reports', 'reports'],
   ['/admin/products', 'Products', 'products'],
   ['/admin/categories', 'Categories', 'products'],
   ['/admin/orders', 'Orders', 'orders'],

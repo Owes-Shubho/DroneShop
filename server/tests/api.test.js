@@ -607,3 +607,106 @@ describe('user management and roles', () => {
 });
 
 
+
+describe('reports', () => {
+  let managerToken, supportToken;
+  const get = (path, token = adminToken, raw = false) => api(`/api/admin/reports${path}`, { token, raw });
+
+  before(async () => {
+    const login = async (email, password) => (await api('/api/auth/login', { method: 'POST', body: { email, password } })).body.token;
+    await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Rita Reports', email: 'rita@test.com', password: 'rita1234', role: 'manager' } });
+    await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Sid Support', email: 'sid@test.com', password: 'sid12345', role: 'support' } });
+    managerToken = await login('rita@test.com', 'rita1234');
+    supportToken = await login('sid@test.com', 'sid12345');
+  });
+
+  test('only roles with the reports permission can run them', async () => {
+    assert.equal((await get('/sales', aliceToken)).status, 403);
+    assert.equal((await get('/sales', supportToken)).status, 403);
+    assert.equal((await get('/sales', managerToken)).status, 200);
+    assert.equal((await get('/sales', adminToken)).status, 200);
+    assert.equal((await api('/api/admin/reports/sales')).status, 401);
+    assert.equal((await get('/sales?format=csv', supportToken, true)).status, 403);
+  });
+
+  test('validates type, dates and grouping', async () => {
+    assert.equal((await get('/nope')).status, 404);
+    assert.equal((await get('/sales?from=2026-13-01')).status, 400);
+    assert.equal((await get('/sales?from=2026-02-30&to=2026-03-01')).status, 400, 'not a real date');
+    assert.equal((await get('/sales?from=yesterday')).status, 400);
+    assert.equal((await get('/sales?from=2026-05-02&to=2026-05-01')).status, 400, 'start after end');
+    assert.equal((await get('/sales?from=2020-01-01&to=2026-01-01')).status, 400, 'range too long');
+    assert.equal((await get('/sales?group=year')).status, 400);
+    assert.equal((await get('/')).body.includes('inventory'), true);
+  });
+
+  test('sales totals match the orders in the database; daily rows include empty days', async () => {
+    const r = await get('/sales');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.rows.length, 30, 'default range is 30 days');
+    const live = await Order.find({ status: { $ne: 'Cancelled' }, isRefunded: { $ne: true } });
+    const revenue = r.body.summary.find((s) => s[0] === 'Revenue')[1];
+    assert.equal(revenue, Math.round(live.reduce((s, o) => s + o.totalPrice, 0) * 100) / 100);
+    assert.equal(r.body.summary.find((s) => s[0] === 'Orders')[1], live.length);
+    assert.equal(r.body.summary.find((s) => s[0] === 'Units sold')[1], live.reduce((s, o) => s + o.items.reduce((n, i) => n + i.qty, 0), 0));
+    const refunded = await Order.find({ isRefunded: true });
+    assert.ok(refunded.length >= 1);
+    assert.equal(r.body.summary.find((s) => s[0] === 'Refunds')[1], Math.round(refunded.reduce((s, o) => s + o.totalPrice, 0) * 100) / 100);
+    assert.equal(r.body.from.length, 10);
+  });
+
+  test('week and month grouping, and a range with no orders', async () => {
+    assert.match((await get('/sales?group=month')).body.rows[0].period, /^\d{4}-\d{2}$/);
+    assert.match((await get('/sales?group=week')).body.rows[0].period, /^\d{4}-W\d{2}$/);
+    const old = await get('/sales?from=2001-01-01&to=2001-01-10');
+    assert.equal(old.body.rows.length, 10);
+    assert.ok(old.body.rows.every((x) => x.revenue === 0 && x.orders === 0));
+    assert.equal(old.body.summary.find((s) => s[0] === 'Average order')[1], 0);
+    assert.equal((await get('/products?from=2001-01-01&to=2001-01-10')).body.rows.length, 0);
+  });
+
+  test('product and category reports agree with each other', async () => {
+    const p = await get('/products');
+    const c = await get('/categories');
+    const sum = (rows) => Math.round(rows.reduce((s, x) => s + x.revenue, 0) * 100) / 100;
+    assert.ok(p.body.rows.length >= 1);
+    assert.equal(sum(p.body.rows), sum(c.body.rows));
+    assert.ok(p.body.rows.every((x, i, a) => i === 0 || a[i - 1].revenue >= x.revenue), 'sorted by revenue');
+    const pct = c.body.rows.reduce((s, x) => s + x.share, 0);
+    assert.ok(Math.abs(pct - 100) < 0.2, `shares add to 100 (got ${pct})`);
+  });
+
+  test('customers, coupons, inventory and returns reports', async () => {
+    const o = await order(aliceToken, [{ product: String(drone._id), qty: 1 }], { couponCode: 'TEN' });
+    assert.equal(o.status, 201);
+    const cust = await get('/customers');
+    assert.ok(cust.body.rows.find((x) => x.email === 'alice@test.com').spent > 0);
+    const cp = await get('/coupons');
+    const ten = cp.body.rows.find((x) => x.code === 'TEN');
+    assert.ok(ten && ten.uses >= 1 && ten.discount > 0);
+    const inv = await get('/inventory');
+    assert.equal(inv.body.rows.length, await Product.countDocuments());
+    assert.equal(inv.body.snapshot, true);
+    assert.ok(inv.body.rows.every((x) => x.value === Math.round(x.price * x.stock * 100) / 100));
+    assert.ok(inv.body.rows.some((x) => x.status === 'Out of stock'), 'the concurrency test sold out a product');
+    const ret = await get('/returns');
+    assert.ok(ret.body.rows.some((x) => x.status === 'Refunded'));
+    await api(`/api/orders/${o.body._id}/cancel`, { method: 'PUT', token: aliceToken });
+  });
+
+  test('CSV export: headers, filename, formula-safe text, plain numbers', async () => {
+    const r = await get('/products?format=csv', adminToken, true);
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('content-type'), /text\/csv/);
+    assert.match(r.headers.get('content-disposition'), /report-products-\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2}\.csv/);
+    const lines = r.body.replace(/^ï»¿/, '').split('\r\n');
+    assert.equal(lines[0], 'Product,Units sold,Orders,Revenue,Average price');
+    assert.ok(lines.some((l) => l.startsWith(`"'=HYPERLINK`)), 'formula neutralised');
+    assert.ok(lines.slice(1).every((l) => !/'\d/.test(l.split(',').slice(-1)[0])), 'numbers not prefixed');
+    const inv = await get('/inventory?format=csv', adminToken, true);
+    assert.match(inv.headers.get('content-disposition'), /report-inventory-\d{4}-\d{2}-\d{2}\.csv/);
+    const sales = await get('/sales?format=csv&group=month', adminToken, true);
+    assert.ok(sales.body.includes('Month,Orders,Units'));
+  });
+});
+

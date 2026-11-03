@@ -84,7 +84,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Bulk import / export (CSV) | ✅ | P2 | Export orders and products (spreadsheet-safe); import products with per-row error report |
 | Review moderation | ✅ | P2 | Admins can remove a review from the product page |
 | Discount / coupon management | ✅ | P2 | Admin page: create, edit, turn on/off, delete |
-| Reports by date range, export | ⬜ | P2 | |
+| Reports by date range, export | ✅ | P2 | Sales, products, categories, customers, inventory, coupons, returns; CSV export and print / PDF. Manager and admin roles |
 | Activity / audit log | ⬜ | P3 | |
 | Staff roles with limited permissions | ✅ | P3 | Support, Manager, Admin with fixed permission sets, enforced on the server and in the dashboard menu; roles are not editable |
 
@@ -106,7 +106,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
 | Server-side validation and error messages | 🟡 | P1 | Checks on auth, orders, coupons, uploads; no schema validation library |
-| Automated tests (API and UI) | 🟡 | P1 | 42 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles); no UI tests |
+| Automated tests (API and UI) | 🟡 | P1 | 49 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles, reports); no UI tests |
 | Image optimisation and CDN | ⬜ | P2 | Images are served as uploaded |
 | Cloud file storage for uploads | ⬜ | P1 | Needed once the server is not a single machine |
 | Environment config and secrets | ✅ | P1 | `.env`, git-ignored |
