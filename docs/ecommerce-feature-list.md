@@ -78,7 +78,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Image upload | ✅ | P1 | JPG, PNG, WebP up to 5 MB, stored on the server's disk |
 | Quick stock edit and low-stock list | ✅ | P1 | |
 | Order list, filter, status change | ✅ | P1 | |
-| Customer list, role change, delete | ✅ | P2 | |
+| User management (list, search, filter, create, edit, suspend, reset password, delete) | ✅ | P2 | Users page and per-user detail page; cannot suspend, demote or delete your own account |
 | Best-seller report | ✅ | P2 | |
 | Category and brand management | 🟡 | P2 | Categories done; brands are free text |
 | Bulk import / export (CSV) | ✅ | P2 | Export orders and products (spreadsheet-safe); import products with per-row error report |
@@ -86,7 +86,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Discount / coupon management | ✅ | P2 | Admin page: create, edit, turn on/off, delete |
 | Reports by date range, export | ⬜ | P2 | |
 | Activity / audit log | ⬜ | P3 | |
-| Staff roles with limited permissions | ⬜ | P3 | |
+| Staff roles with limited permissions | ✅ | P3 | Support, Manager, Admin with fixed permission sets, enforced on the server and in the dashboard menu; roles are not editable |
 
 ## 6. Content, SEO and marketing
 
@@ -106,7 +106,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
 | Server-side validation and error messages | 🟡 | P1 | Checks on auth, orders, coupons, uploads; no schema validation library |
-| Automated tests (API and UI) | 🟡 | P1 | 33 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import); no UI tests |
+| Automated tests (API and UI) | 🟡 | P1 | 42 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles); no UI tests |
 | Image optimisation and CDN | ⬜ | P2 | Images are served as uploaded |
 | Cloud file storage for uploads | ⬜ | P1 | Needed once the server is not a single machine |
 | Environment config and secrets | ✅ | P1 | `.env`, git-ignored |
@@ -119,4 +119,4 @@ A standard feature checklist for an online shop, with the current status of this
 
 1. **Take real orders safely (P1):** online payments (needs a payment-provider account and keys), a real SMTP service for email, database backups, cloud storage for uploaded images.
 2. **Raise conversion (P2):** guest checkout, product variants, shipping zones/carrier rates and regional tax, brand management.
-3. **Grow (P3):** staff roles, two-factor login for admins, multi-currency and language.
+3. **Grow (P3):** two-factor login for admins, multi-currency and language.

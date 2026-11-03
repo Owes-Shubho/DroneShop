@@ -4,11 +4,15 @@ import crypto from 'crypto';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import { mail } from '../utils/mailer.js';
+import { roleOf, permissionsOf } from '../utils/permissions.js';
 
 const router = Router();
 
 const sign = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-export const payload = (u) => ({ _id: u._id, name: u.name, email: u.email, isAdmin: u.isAdmin, token: sign(u._id) });
+export const identity = (u) => ({
+  _id: u._id, name: u.name, email: u.email, isAdmin: roleOf(u) === 'admin', role: roleOf(u), permissions: permissionsOf(u),
+});
+export const payload = (u) => ({ ...identity(u), token: sign(u._id) });
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const isEmail = (s) => typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
@@ -38,20 +42,27 @@ router.post('/login', async (req, res, next) => {
       res.status(401);
       throw new Error('Invalid email or password');
     }
+    if (user.disabled) {
+      res.status(403);
+      throw new Error('This account has been suspended. Contact support.');
+    }
+    user.lastLoginAt = new Date();
+    await user.save();
     res.json(payload(user));
   } catch (err) {
     next(err);
   }
 });
 
-router.get('/me', protect, (req, res) => res.json(req.user));
+// Current identity, so the client can pick up role changes without signing in again.
+router.get('/me', protect, (req, res) => res.json(identity(req.user)));
 
 // Always answers the same way so the endpoint cannot be used to discover which emails are registered.
 router.post('/forgot', async (req, res, next) => {
   try {
     const email = String(req.body.email || '').toLowerCase();
     const user = isEmail(email) ? await User.findOne({ email }) : null;
-    if (user) {
+    if (user && !user.disabled) {
       const token = crypto.randomBytes(32).toString('hex');
       user.resetTokenHash = sha256(token);
       user.resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000);

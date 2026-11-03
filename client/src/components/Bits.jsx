@@ -69,10 +69,12 @@ export function ProductCard({ p }) {
   );
 }
 
-export function Protected({ children, adminOnly }) {
-  const { user } = useAuth();
+// `adminOnly` lets any staff role in; `permission` narrows it to roles that hold that permission.
+export function Protected({ children, adminOnly, permission }) {
+  const { user, can, isStaff } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (adminOnly && !user.isAdmin) return <Navigate to="/" replace />;
+  if (adminOnly && !isStaff) return <Navigate to="/" replace />;
+  if (permission && !can(permission)) return <Navigate to="/admin" replace />;
   return children;
 }
 

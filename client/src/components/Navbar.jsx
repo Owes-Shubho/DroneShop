@@ -7,7 +7,7 @@ import { useWishlist } from '../context/WishlistContext.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 
 export default function Navbar() {
-  const { user, logout } = useAuth();
+  const { user, logout, isStaff } = useAuth();
   const { count } = useCart();
   const wish = useWishlist();
   const [q, setQ] = useState('');
@@ -30,7 +30,7 @@ export default function Navbar() {
         </form>
         <nav className="nav-links">
           <NavLink to="/shop">Shop</NavLink>
-          {user?.isAdmin && <NavLink to="/admin">Admin</NavLink>}
+          {isStaff && <NavLink to="/admin">{user.isAdmin ? 'Admin' : 'Staff'}</NavLink>}
           {user && <NavLink to="/orders">Orders</NavLink>}
           {user && (
             <NavLink to="/wishlist" aria-label="Wishlist">

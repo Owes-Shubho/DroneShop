@@ -3,9 +3,10 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import Coupon from '../models/Coupon.js';
 import User from '../models/User.js';
-import { protect, admin } from '../middleware/auth.js';
+import { protect, requires } from '../middleware/auth.js';
 import { totals, couponProblem } from '../utils/pricing.js';
 import { mail } from '../utils/mailer.js';
+import { can } from '../utils/permissions.js';
 
 const router = Router();
 const STATUSES = ['Processing', 'Shipped', 'Delivered', 'Cancelled'];
@@ -134,7 +135,7 @@ router.get('/mine', protect, async (req, res, next) => {
   }
 });
 
-router.get('/', protect, admin, async (req, res, next) => {
+router.get('/', protect, requires('orders'), async (req, res, next) => {
   try {
     res.json(await Order.find().populate('user', 'name email').sort({ createdAt: -1 }));
   } catch (err) {
@@ -145,7 +146,7 @@ router.get('/', protect, admin, async (req, res, next) => {
 router.get('/:id', protect, async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id).populate('user', 'name email');
-    if (!order || (!req.user.isAdmin && !order.user?._id.equals(req.user._id))) throw fail(res, 404, 'Order not found');
+    if (!order || (!can(req.user, 'orders') && !order.user?._id.equals(req.user._id))) throw fail(res, 404, 'Order not found');
     res.json(order);
   } catch (err) {
     next(err);
@@ -187,7 +188,7 @@ router.post('/:id/return', protect, async (req, res, next) => {
 });
 
 // Admin decision: approve, reject, or refund (refund puts the items back in stock).
-router.put('/:id/return', protect, admin, async (req, res, next) => {
+router.put('/:id/return', protect, requires('orders'), async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) throw fail(res, 404, 'Order not found');
@@ -210,7 +211,7 @@ router.put('/:id/return', protect, admin, async (req, res, next) => {
   }
 });
 
-router.put('/:id/status', protect, admin, async (req, res, next) => {
+router.put('/:id/status', protect, requires('orders'), async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) throw fail(res, 404, 'Order not found');
@@ -244,7 +245,7 @@ router.put('/:id/status', protect, admin, async (req, res, next) => {
 });
 
 // Saves carrier and tracking number; a processing order is marked as shipped and the customer is emailed.
-router.put('/:id/tracking', protect, admin, async (req, res, next) => {
+router.put('/:id/tracking', protect, requires('orders'), async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) throw fail(res, 404, 'Order not found');

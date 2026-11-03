@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import Product from '../models/Product.js';
 import Category from '../models/Category.js';
-import { protect, admin } from '../middleware/auth.js';
+import { protect, requires } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -104,7 +104,7 @@ async function checkCategory(data, res) {
   }
 }
 
-router.post('/', protect, admin, async (req, res, next) => {
+router.post('/', protect, requires('products'), async (req, res, next) => {
   try {
     const data = clean(req.body);
     await checkCategory(data, res);
@@ -114,7 +114,7 @@ router.post('/', protect, admin, async (req, res, next) => {
   }
 });
 
-router.put('/:id', protect, admin, async (req, res, next) => {
+router.put('/:id', protect, requires('products'), async (req, res, next) => {
   try {
     const data = clean(req.body);
     await checkCategory(data, res);
@@ -132,7 +132,7 @@ router.put('/:id', protect, admin, async (req, res, next) => {
   }
 });
 
-router.delete('/:id', protect, admin, async (req, res, next) => {
+router.delete('/:id', protect, requires('products'), async (req, res, next) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) {
@@ -167,7 +167,7 @@ router.post('/:id/reviews', protect, async (req, res, next) => {
   }
 });
 
-router.delete('/:id/reviews/:reviewId', protect, admin, async (req, res, next) => {
+router.delete('/:id/reviews/:reviewId', protect, requires('products'), async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
     const review = product?.reviews.id(req.params.reviewId);

@@ -15,13 +15,14 @@ import Invoice from './pages/Invoice.jsx';
 import Info from './pages/Info.jsx';
 import Coupons from './pages/admin/Coupons.jsx';
 import { MyOrders, OrderDetail } from './pages/Orders.jsx';
-import AdminLayout from './pages/admin/AdminLayout.jsx';
-import Overview from './pages/admin/Overview.jsx';
+import AdminLayout, { AdminHome } from './pages/admin/AdminLayout.jsx';
 import AdminProducts from './pages/admin/Products.jsx';
 import ProductForm from './pages/admin/ProductForm.jsx';
 import AdminOrders from './pages/admin/AdminOrders.jsx';
 import Users from './pages/admin/Users.jsx';
 import Categories from './pages/admin/Categories.jsx';
+import UserDetail from './pages/admin/UserDetail.jsx';
+import Roles from './pages/admin/Roles.jsx';
 import Compare from './pages/Compare.jsx';
 import CompareBar from './components/CompareBar.jsx';
 
@@ -51,14 +52,16 @@ export default function App() {
           <Route path="/orders" element={<Protected><MyOrders /></Protected>} />
           <Route path="/orders/:id" element={<Protected><OrderDetail /></Protected>} />
           <Route path="/admin" element={<Protected adminOnly><AdminLayout /></Protected>}>
-            <Route index element={<Overview />} />
-            <Route path="products" element={<AdminProducts />} />
-            <Route path="products/new" element={<ProductForm />} />
-            <Route path="products/:id" element={<ProductForm />} />
-            <Route path="categories" element={<Categories />} />
-            <Route path="orders" element={<AdminOrders />} />
-            <Route path="coupons" element={<Coupons />} />
-            <Route path="users" element={<Users />} />
+            <Route index element={<AdminHome />} />
+            <Route path="products" element={<Protected permission="products"><AdminProducts /></Protected>} />
+            <Route path="products/new" element={<Protected permission="products"><ProductForm /></Protected>} />
+            <Route path="products/:id" element={<Protected permission="products"><ProductForm /></Protected>} />
+            <Route path="categories" element={<Protected permission="products"><Categories /></Protected>} />
+            <Route path="orders" element={<Protected permission="orders"><AdminOrders /></Protected>} />
+            <Route path="coupons" element={<Protected permission="coupons"><Coupons /></Protected>} />
+            <Route path="users" element={<Protected permission="users.view"><Users /></Protected>} />
+            <Route path="users/:id" element={<Protected permission="users.view"><UserDetail /></Protected>} />
+            <Route path="roles" element={<Protected permission="users.view"><Roles /></Protected>} />
           </Route>
           <Route path="*" element={<p>Page not found. <Link to="/">Go home</Link></p>} />
         </Routes>

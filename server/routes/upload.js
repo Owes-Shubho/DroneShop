@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { protect, admin } from '../middleware/auth.js';
+import { protect, requires } from '../middleware/auth.js';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'uploads');
 fs.mkdirSync(dir, { recursive: true });
@@ -26,7 +26,7 @@ const upload = multer({
 
 const router = Router();
 
-router.post('/', protect, admin, (req, res, next) => {
+router.post('/', protect, requires('products'), (req, res, next) => {
   upload.single('image')(req, res, (err) => {
     if (err) {
       res.status(400);

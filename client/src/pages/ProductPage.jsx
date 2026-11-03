@@ -12,7 +12,7 @@ export default function ProductPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const { add } = useCart();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const wish = useWishlist();
   const [p, setP] = useState(null);
   const [qty, setQty] = useState(1);
@@ -149,7 +149,7 @@ export default function ProductPage() {
         <div key={r._id} className="review">
           <div className="row between">
             <span><strong>{r.name}</strong> <Stars value={r.rating} /></span>
-            {user?.isAdmin && <button className="link danger" onClick={() => removeReview(r._id)}>Remove</button>}
+            {can('products') && <button className="link danger" onClick={() => removeReview(r._id)}>Remove</button>}
           </div>
           <p>{r.comment}</p>
         </div>

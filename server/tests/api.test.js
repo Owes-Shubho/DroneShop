@@ -464,3 +464,146 @@ describe('categories, related, cart, returns, import', () => {
   });
 });
 
+
+describe('user management and roles', () => {
+  let carol, supportToken, managerToken;
+  const admin = (path, opts = {}) => api(`/api/admin${path}`, { token: adminToken, ...opts });
+
+  test('admin creates users with roles; validation and duplicates', async () => {
+    const mk = (body, token = adminToken) => api('/api/admin/users', { method: 'POST', token, body });
+    assert.equal((await mk({ name: 'X', email: 'x@t.co', password: 'secret1' }, aliceToken)).status, 403);
+    assert.equal((await mk({ name: '', email: 'x@t.co', password: 'secret1' })).status, 400);
+    assert.equal((await mk({ name: 'X', email: 'bad', password: 'secret1' })).status, 400);
+    assert.equal((await mk({ name: 'X', email: 'x@t.co', password: '123' })).status, 400);
+    assert.equal((await mk({ name: 'X', email: 'x@t.co', password: 'secret1', role: 'wizard' })).status, 400);
+    const s = await mk({ name: 'Sam Support', email: 'Sam@Test.com', password: 'support1', role: 'support' });
+    assert.equal(s.status, 201);
+    assert.equal(s.body.role, 'support');
+    assert.equal(s.body.email, 'sam@test.com');
+    assert.equal(s.body.password, undefined);
+    assert.equal((await mk({ name: 'Dup', email: 'sam@test.com', password: 'secret1' })).status, 400);
+    const m = await mk({ name: 'Max Manager', email: 'max@test.com', password: 'manager1', role: 'manager' });
+    assert.equal(m.body.role, 'manager');
+    carol = (await User.findOne({ email: 'carol@test.com' }))._id;
+    const login = async (email, password) => (await api('/api/auth/login', { method: 'POST', body: { email, password } }));
+    const ls = await login('sam@test.com', 'support1');
+    assert.equal(ls.body.role, 'support');
+    assert.equal(ls.body.isAdmin, false);
+    assert.ok(ls.body.permissions.includes('orders'));
+    supportToken = ls.body.token;
+    managerToken = (await login('max@test.com', 'manager1')).body.token;
+  });
+
+  test('roles limit what staff can reach', async () => {
+    const get = (path, token) => api(path, { token });
+    // support: orders yes; catalogue, coupons, stats, user changes no
+    assert.equal((await get('/api/orders', supportToken)).status, 200);
+    assert.equal((await get('/api/admin/users', supportToken)).status, 200);
+    assert.equal((await get('/api/admin/stats', supportToken)).status, 403);
+    assert.equal((await get('/api/admin/coupons', supportToken)).status, 403);
+    assert.equal((await api('/api/products', { method: 'POST', token: supportToken, body: {} })).status, 403);
+    assert.equal((await api(`/api/admin/users/${carol}`, { method: 'PUT', token: supportToken, body: { name: 'Z' } })).status, 403);
+    // manager: catalogue, coupons, stats; cannot manage users or roles
+    assert.equal((await get('/api/admin/stats', managerToken)).status, 200);
+    assert.equal((await get('/api/admin/coupons', managerToken)).status, 200);
+    assert.equal((await get('/api/admin/users', managerToken)).status, 200);
+    assert.equal((await api('/api/admin/users', { method: 'POST', token: managerToken, body: { name: 'N', email: 'n@t.co', password: 'secret1' } })).status, 403);
+    assert.equal((await api(`/api/admin/users/${carol}/role`, { method: 'PUT', token: managerToken, body: { role: 'admin' } })).status, 403);
+    assert.equal((await api(`/api/admin/users/${carol}`, { method: 'DELETE', token: managerToken })).status, 403);
+    // support can view a customer's order but a plain customer cannot view someone else's
+    const o = await order(aliceToken, [{ product: String(cheap._id), qty: 1 }]);
+    assert.equal((await get(`/api/orders/${o.body._id}`, supportToken)).status, 200);
+    assert.equal((await get(`/api/orders/${o.body._id}`, bobToken)).status, 404);
+    // /auth/me reflects the current role
+    assert.equal((await get('/api/auth/me', managerToken)).body.role, 'manager');
+  });
+
+  test('list: search, role and status filters, pagination', async () => {
+    const all = await admin('/users');
+    assert.equal(all.status, 200);
+    assert.ok(all.body.total >= 5);
+    assert.ok(all.body.users.every((u) => u.password === undefined && u.role));
+    assert.deepEqual((await admin('/users?q=sam%40test')).body.users.map((u) => u.email), ['sam@test.com']);
+    assert.equal((await admin('/users?q=.*')).body.total, 0, 'search text is not a regex');
+    assert.deepEqual((await admin('/users?role=support')).body.users.map((u) => u.role), ['support']);
+    assert.ok((await admin('/users?role=customer')).body.users.every((u) => u.role === 'customer'));
+    assert.ok((await admin('/users?role=admin')).body.users.every((u) => u.isAdmin));
+    assert.equal((await admin('/users?limit=2')).body.users.length, 2);
+    assert.equal((await admin('/users?status=suspended')).body.total, 0);
+  });
+
+  test('detail shows profile, order totals and recent orders', async () => {
+    const alice = await User.findOne({ email: 'alice@test.com' });
+    const d = await admin(`/users/${alice._id}`);
+    assert.equal(d.status, 200);
+    assert.equal(d.body.email, 'alice@test.com');
+    assert.ok(d.body.orders >= 1);
+    assert.ok(Array.isArray(d.body.recentOrders));
+    assert.equal((await admin('/users/nope')).status, 404);
+    assert.equal((await admin(`/users/${new mongoose.Types.ObjectId()}`)).status, 404);
+  });
+
+  test('edit profile, suspend blocks sign-in and live sessions, reinstate restores', async () => {
+    const bob = await User.findOne({ email: 'bob@test.com' });
+    const put = (body) => admin(`/users/${bob._id}`, { method: 'PUT', body });
+    assert.equal((await put({ name: ' ' })).status, 400);
+    assert.equal((await put({ email: 'alice@test.com' })).status, 400, 'email taken');
+    assert.equal((await put({ name: 'Bobby' })).body.name, 'Bobby');
+    assert.equal((await put({ disabled: true })).body.disabled, true);
+    assert.equal((await api('/api/auth/login', { method: 'POST', body: { email: 'bob@test.com', password: 'bob12345' } })).status, 403);
+    assert.equal((await api('/api/orders/mine', { token: bobToken })).status, 401, 'existing token stops working');
+    assert.equal((await put({ disabled: false })).body.disabled, false);
+    assert.equal((await api('/api/orders/mine', { token: bobToken })).status, 200);
+    assert.equal((await api('/api/auth/login', { method: 'POST', body: { email: 'bob@test.com', password: 'bob12345' } })).status, 200);
+  });
+
+  test('role changes: promote, demote, guard rails', async () => {
+    const setRole = (id, role, token = adminToken) => api(`/api/admin/users/${id}/role`, { method: 'PUT', token, body: { role } });
+    assert.equal((await setRole(carol, 'wizard')).status, 400);
+    assert.equal((await setRole(carol, 'manager')).body.role, 'manager');
+    const meAdmin = await User.findOne({ email: 'admin@test.com' });
+    assert.equal((await setRole(meAdmin._id, 'customer')).status, 400, 'not your own role');
+    // promote carol to admin, then admin can be demoted again because another admin exists
+    const promoted = await setRole(carol, 'admin');
+    assert.equal(promoted.body.isAdmin, true);
+    assert.equal((await api('/api/admin/users', { token: (await api('/api/auth/login', { method: 'POST', body: { email: 'carol@test.com', password: 'carol123' } })).body.token })).status, 200);
+    assert.equal((await setRole(carol, 'customer')).body.isAdmin, false);
+    assert.equal((await User.findById(carol)).role, 'customer', 'demotion sticks after save');
+  });
+
+  test('admins can manage each other but never themselves; a suspended admin is locked out', async () => {
+    const meAdmin = await User.findOne({ email: 'admin@test.com' });
+    const second = await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Second', email: 'second@test.com', password: 'second12', role: 'admin' } });
+    assert.equal(second.body.isAdmin, true);
+    const secondToken = (await api('/api/auth/login', { method: 'POST', body: { email: 'second@test.com', password: 'second12' } })).body.token;
+    assert.equal((await api(`/api/admin/users/${second.body._id}`, { method: 'PUT', token: secondToken, body: { disabled: true } })).status, 400, 'cannot suspend yourself');
+    assert.equal((await api(`/api/admin/users/${second.body._id}`, { method: 'DELETE', token: secondToken })).status, 400, 'cannot delete yourself');
+    assert.equal((await admin(`/users/${meAdmin._id}`, { method: 'PUT', body: { disabled: true } })).status, 400, 'cannot suspend yourself (first admin)');
+    assert.equal((await admin(`/users/${second.body._id}`, { method: 'PUT', body: { disabled: true } })).status, 200);
+    assert.equal((await api('/api/admin/users', { token: secondToken })).status, 401, 'suspended admin is locked out');
+    assert.equal((await admin(`/users/${second.body._id}`, { method: 'DELETE' })).status, 200);
+  });
+  test('admin-triggered password reset and delete', async () => {
+    const dave = await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Dave', email: 'dave@test.com', password: 'dave1234' } });
+    const r = await admin(`/users/${dave.body._id}/reset-password`, { method: 'POST' });
+    assert.equal(r.status, 200);
+    assert.match(r.body.message, /dave@test.com/);
+    const stored = await User.findById(dave.body._id).select('+resetTokenHash +resetTokenExpires');
+    assert.ok(stored.resetTokenHash && stored.resetTokenExpires > new Date());
+    assert.equal((await api(`/api/admin/users/${dave.body._id}/reset-password`, { method: 'POST', token: supportToken })).status, 403);
+    assert.equal((await admin(`/users/${dave.body._id}`, { method: 'DELETE' })).status, 200);
+    assert.equal((await admin(`/users/${dave.body._id}`)).status, 404);
+  });
+
+  test('roles overview lists permissions and user counts', async () => {
+    const r = await admin('/roles');
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.roles.map((x) => x.name), ['customer', 'support', 'manager', 'admin']);
+    assert.ok(r.body.roles.find((x) => x.name === 'admin').permissions.includes('roles'));
+    assert.ok(r.body.roles.find((x) => x.name === 'support').users >= 1);
+    assert.ok(r.body.permissions['users.manage']);
+    assert.equal((await api('/api/admin/roles', { token: aliceToken })).status, 403);
+  });
+});
+
+

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import Category from '../models/Category.js';
 import Product from '../models/Product.js';
-import { protect, admin } from '../middleware/auth.js';
+import { protect, requires } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -40,7 +40,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', protect, admin, async (req, res, next) => {
+router.post('/', protect, requires('products'), async (req, res, next) => {
   try {
     res.status(201).json(await Category.create({ name: nameOf(req.body, res) }));
   } catch (err) {
@@ -49,7 +49,7 @@ router.post('/', protect, admin, async (req, res, next) => {
 });
 
 // Renaming also moves the category's products so none are left pointing at the old name.
-router.put('/:id', protect, admin, async (req, res, next) => {
+router.put('/:id', protect, requires('products'), async (req, res, next) => {
   try {
     const cat = await Category.findById(req.params.id);
     if (!cat) throw fail(res, 404, 'Category not found');
@@ -64,7 +64,7 @@ router.put('/:id', protect, admin, async (req, res, next) => {
   }
 });
 
-router.delete('/:id', protect, admin, async (req, res, next) => {
+router.delete('/:id', protect, requires('products'), async (req, res, next) => {
   try {
     const cat = await Category.findById(req.params.id);
     if (!cat) throw fail(res, 404, 'Category not found');

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 const AuthContext = createContext(null);
@@ -16,10 +16,21 @@ export function AuthProvider({ children }) {
   // Stores the signed-in user (including the token) in state and localStorage.
   const save = (u) => {
     setUser(u);
-    if (u) localStorage.setItem('user', JSON.stringify(u));
-    else localStorage.removeItem('user');
+    try {
+      if (u) localStorage.setItem('user', JSON.stringify(u));
+      else localStorage.removeItem('user');
+    } catch { /* storage unavailable */ }
     return u;
   };
+
+  // Pick up role changes made since the last sign-in; a deleted or suspended account is signed out.
+  const token = user?.token;
+  useEffect(() => {
+    if (!token) return;
+    api('/auth/me', { token })
+      .then((me) => save({ ...me, token }))
+      .catch((err) => { if (/not authorized|suspended/i.test(err.message)) save(null); });
+  }, [token]);
 
   const login = async (email, password) =>
     save(await api('/auth/login', { method: 'POST', body: { email, password } }));
@@ -27,7 +38,11 @@ export function AuthProvider({ children }) {
     save(await api('/auth/register', { method: 'POST', body: { name, email, password } }));
   const logout = () => save(null);
 
+  // Admins can do everything; other staff roles carry a permission list from the server.
+  const can = (permission) => Boolean(user?.isAdmin || user?.permissions?.includes(permission));
+  const isStaff = Boolean(user?.isAdmin || user?.permissions?.length);
+
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, setSession: save }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, login, register, logout, setSession: save, can, isStaff }}>{children}</AuthContext.Provider>
   );
 }

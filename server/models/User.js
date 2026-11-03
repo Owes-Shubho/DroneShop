@@ -17,6 +17,9 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 6 },
     isAdmin: { type: Boolean, default: false },
+    role: { type: String, enum: ['customer', 'support', 'manager', 'admin'], default: 'customer' }, // kept in step with isAdmin on save
+    disabled: { type: Boolean, default: false }, // suspended accounts cannot sign in
+    lastLoginAt: Date,
     addresses: [addressSchema],
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
     cart: [{ _id: false, product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' }, qty: { type: Number, min: 1 } }],
@@ -25,6 +28,12 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+userSchema.pre('validate', function (next) {
+  if (this.isAdmin) this.role = 'admin';
+  else if (this.role === 'admin') this.isAdmin = true; // setting role: 'admin' makes an admin
+  next();
+});
 
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();

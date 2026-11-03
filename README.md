@@ -43,7 +43,8 @@ npm run client   # App on http://localhost:5173
 - Accounts: profile, change/reset password, saved addresses, wishlist, cart saved to the account (merged on sign-in)
 - Shopping: related products, recently viewed, side-by-side compare (up to 4), editable categories
 - Checkout: coupon codes, server-calculated totals, order cancel while processing, tracking numbers, printable invoice, return requests within 30 days with approve / reject / refund
-- Admin (`/admin`): overview, products with image upload, orders and shipments, categories, coupons, customers, CSV export and import of products
+- Admin (`/admin`): overview, products with image upload, orders and shipments, categories, coupons, users, roles, CSV export and import of products
+- Users and roles: search and filter users, add users, edit profiles, suspend / reinstate, send a password-reset link, delete; roles Customer, Support, Manager and Admin with fixed permissions (see the Roles page)
 - Static pages (About, Shipping, Returns, Privacy, Terms, Contact) — **starter text, review before launch**
 
 ## Email

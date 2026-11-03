@@ -1,18 +1,22 @@
 import { Router } from 'express';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
+import { mail } from '../utils/mailer.js';
+import { PERMISSIONS, ROLES, ROLE_NAMES, roleOf } from '../utils/permissions.js';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
 import Order from '../models/Order.js';
 import Coupon from '../models/Coupon.js';
 import Category from '../models/Category.js';
 import { parseCsv } from '../utils/csvParse.js';
-import { protect, admin } from '../middleware/auth.js';
+import { protect, staff, requires } from '../middleware/auth.js';
 
 const router = Router();
-router.use(protect, admin);
+router.use(protect, staff);
 
 const LOW_STOCK = 5;
 
-router.get('/stats', async (req, res, next) => {
+router.get('/stats', requires('dashboard'), async (req, res, next) => {
   try {
     const since = new Date();
     since.setHours(0, 0, 0, 0);
@@ -86,49 +90,198 @@ router.get('/stats', async (req, res, next) => {
   }
 });
 
-router.get('/users', async (req, res, next) => {
+// ----- users -----
+const bad = (res, status, message) => {
+  res.status(status);
+  return new Error(message);
+};
+const isEmail = (s) => typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const view = (u) => {
+  const o = u.toObject ? u.toObject() : u;
+  const { password, resetTokenHash, resetTokenExpires, __v, ...rest } = o;
+  return { ...rest, role: roleOf(o), isAdmin: roleOf(o) === 'admin' };
+};
+const applyRole = (user, role) => {
+  user.role = role;
+  user.isAdmin = role === 'admin';
+};
+// Someone other than `id` must stay an active admin, or nobody could manage users any more.
+const otherAdmins = (id) => User.countDocuments({ isAdmin: true, disabled: { $ne: true }, _id: { $ne: id } });
+const findUser = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw bad(res, 404, 'User not found');
+  const user = await User.findById(req.params.id).select('-password');
+  if (!user) throw bad(res, 404, 'User not found');
+  return user;
+};
+const notSelf = (req, res, what) => {
+  if (req.params.id === String(req.user._id)) throw bad(res, 400, `You cannot ${what} your own account`);
+};
+
+router.get('/roles', requires('users.view'), async (req, res, next) => {
   try {
-    const users = await User.find().select('-password').sort({ createdAt: -1 }).lean();
+    const counts = await User.aggregate([{ $group: { _id: { $cond: ['$isAdmin', 'admin', { $ifNull: ['$role', 'customer'] }] }, count: { $sum: 1 } } }]);
+    const byRole = Object.fromEntries(counts.map((c) => [c._id, c.count]));
+    res.json({
+      permissions: PERMISSIONS,
+      roles: ROLE_NAMES.map((name) => ({ name, ...ROLES[name], users: byRole[name] || 0 })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/users?q=&role=&status=active|suspended&page=&limit=
+router.get('/users', requires('users.view'), async (req, res, next) => {
+  try {
+    const { q, role, status } = req.query;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const filter = {};
+    if (typeof q === 'string' && q.trim()) {
+      const re = new RegExp(escapeRe(q.trim().slice(0, 60)), 'i');
+      filter.$or = [{ name: re }, { email: re }];
+    }
+    if (ROLE_NAMES.includes(role)) {
+      if (role === 'admin') filter.isAdmin = true;
+      else {
+        filter.isAdmin = { $ne: true };
+        filter.role = role === 'customer' ? { $in: ['customer', null] } : role;
+      }
+    }
+    if (status === 'suspended') filter.disabled = true;
+    if (status === 'active') filter.disabled = { $ne: true };
+
+    const total = await User.countDocuments(filter);
+    const users = await User.find(filter).select('-password').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
     const counts = await Order.aggregate([
+      { $match: { user: { $in: users.map((u) => u._id) }, status: { $ne: 'Cancelled' } } },
       { $group: { _id: '$user', orders: { $sum: 1 }, spent: { $sum: '$totalPrice' } } },
     ]);
     const byUser = Object.fromEntries(counts.map((c) => [String(c._id), c]));
-    res.json(users.map((u) => ({ ...u, orders: byUser[u._id]?.orders || 0, spent: byUser[u._id]?.spent || 0 })));
+    res.json({
+      users: users.map((u) => ({ ...view(u), orders: byUser[u._id]?.orders || 0, spent: byUser[u._id]?.spent || 0 })),
+      page,
+      pages: Math.ceil(total / limit),
+      total,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/users/:id/admin', async (req, res, next) => {
+router.get('/users/:id', requires('users.view'), async (req, res, next) => {
   try {
-    if (req.params.id === String(req.user._id)) {
-      res.status(400);
-      throw new Error('You cannot change your own admin role');
+    const user = await findUser(req, res);
+    const [orders, totals] = await Promise.all([
+      Order.find({ user: user._id }).sort({ createdAt: -1 }).limit(10).select('totalPrice status createdAt items isRefunded'),
+      Order.aggregate([
+        { $match: { user: user._id, status: { $ne: 'Cancelled' }, isRefunded: { $ne: true } } },
+        { $group: { _id: null, orders: { $sum: 1 }, spent: { $sum: '$totalPrice' } } },
+      ]),
+    ]);
+    res.json({ ...view(user), wishlistCount: user.wishlist.length, orders: totals[0]?.orders || 0, spent: totals[0]?.spent || 0, recentOrders: orders });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/users', requires('users.manage'), async (req, res, next) => {
+  try {
+    const { name, email, password, role = 'customer' } = req.body;
+    if (typeof name !== 'string' || !name.trim() || !isEmail(email) || typeof password !== 'string' || password.length < 6) {
+      throw bad(res, 400, 'A name, a valid email and a password of at least 6 characters are required');
     }
-    const user = await User.findById(req.params.id).select('-password');
-    if (!user) {
-      res.status(404);
-      throw new Error('User not found');
-    }
-    user.isAdmin = Boolean(req.body.isAdmin);
+    if (!ROLE_NAMES.includes(role)) throw bad(res, 400, 'Unknown role');
+    if (await User.findOne({ email: email.trim().toLowerCase() })) throw bad(res, 400, 'Email already registered');
+    const user = new User({ name, email, password });
+    applyRole(user, role);
     await user.save();
-    res.json(user);
+    res.status(201).json(view(user));
   } catch (err) {
     next(err);
   }
 });
 
-router.delete('/users/:id', async (req, res, next) => {
+// Edit name / email, or suspend and reinstate an account.
+router.put('/users/:id', requires('users.manage'), async (req, res, next) => {
   try {
-    if (req.params.id === String(req.user._id)) {
-      res.status(400);
-      throw new Error('You cannot delete your own account');
+    const user = await findUser(req, res);
+    const { name, email, disabled } = req.body;
+    if (typeof name === 'string') {
+      if (!name.trim()) throw bad(res, 400, 'Name cannot be empty');
+      user.name = name.trim();
     }
-    const user = await User.findByIdAndDelete(req.params.id);
-    if (!user) {
-      res.status(404);
-      throw new Error('User not found');
+    if (typeof email === 'string' && email.trim().toLowerCase() !== user.email) {
+      if (!isEmail(email)) throw bad(res, 400, 'Enter a valid email');
+      if (await User.findOne({ email: email.trim().toLowerCase() })) throw bad(res, 400, 'Email already registered');
+      user.email = email;
     }
+    if (typeof disabled === 'boolean' && disabled !== Boolean(user.disabled)) {
+      if (disabled) {
+        notSelf(req, res, 'suspend');
+        if (user.isAdmin && !(await otherAdmins(user._id))) throw bad(res, 400, 'You cannot suspend the last active admin');
+      }
+      user.disabled = disabled;
+    }
+    await user.save();
+    res.json(view(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/users/:id/role', requires('roles'), async (req, res, next) => {
+  try {
+    const user = await findUser(req, res);
+    const { role } = req.body;
+    if (!ROLE_NAMES.includes(role)) throw bad(res, 400, 'Unknown role');
+    notSelf(req, res, 'change the role of');
+    if (user.isAdmin && role !== 'admin' && !(await otherAdmins(user._id))) throw bad(res, 400, 'You cannot demote the last active admin');
+    applyRole(user, role);
+    await user.save();
+    res.json(view(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Older clients toggle admin with a boolean; this maps it onto roles.
+router.put('/users/:id/admin', requires('roles'), async (req, res, next) => {
+  try {
+    const user = await findUser(req, res);
+    notSelf(req, res, 'change the role of');
+    const makeAdmin = Boolean(req.body.isAdmin);
+    if (user.isAdmin && !makeAdmin && !(await otherAdmins(user._id))) throw bad(res, 400, 'You cannot demote the last active admin');
+    applyRole(user, makeAdmin ? 'admin' : 'customer');
+    await user.save();
+    res.json(view(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Sends the user a password-reset link (same single-use, one-hour token as "forgot password").
+router.post('/users/:id/reset-password', requires('users.manage'), async (req, res, next) => {
+  try {
+    const user = await findUser(req, res);
+    const token = crypto.randomBytes(32).toString('hex');
+    user.resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    user.resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await user.save();
+    mail.passwordReset(user, token);
+    res.json({ message: `Reset link sent to ${user.email}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/users/:id', requires('users.manage'), async (req, res, next) => {
+  try {
+    const user = await findUser(req, res);
+    notSelf(req, res, 'delete');
+    if (user.isAdmin && !(await otherAdmins(user._id))) throw bad(res, 400, 'You cannot delete the last active admin');
+    await user.deleteOne();
     res.json({ message: 'User removed' });
   } catch (err) {
     next(err);
@@ -145,7 +298,7 @@ const couponData = (body) => {
   return d;
 };
 
-router.get('/coupons', async (req, res, next) => {
+router.get('/coupons', requires('coupons'), async (req, res, next) => {
   try {
     res.json(await Coupon.find().sort({ createdAt: -1 }));
   } catch (err) {
@@ -153,7 +306,7 @@ router.get('/coupons', async (req, res, next) => {
   }
 });
 
-router.post('/coupons', async (req, res, next) => {
+router.post('/coupons', requires('coupons'), async (req, res, next) => {
   try {
     res.status(201).json(await Coupon.create(couponData(req.body)));
   } catch (err) {
@@ -165,7 +318,7 @@ router.post('/coupons', async (req, res, next) => {
   }
 });
 
-router.put('/coupons/:id', async (req, res, next) => {
+router.put('/coupons/:id', requires('coupons'), async (req, res, next) => {
   try {
     const coupon = await Coupon.findById(req.params.id);
     if (!coupon) {
@@ -186,7 +339,7 @@ router.put('/coupons/:id', async (req, res, next) => {
   }
 });
 
-router.delete('/coupons/:id', async (req, res, next) => {
+router.delete('/coupons/:id', requires('coupons'), async (req, res, next) => {
   try {
     const coupon = await Coupon.findByIdAndDelete(req.params.id);
     if (!coupon) {
@@ -213,7 +366,7 @@ const sendCsv = (res, name, body) => {
   res.send('\uFEFF' + body); // BOM so Excel reads UTF-8
 };
 
-router.get('/export/orders.csv', async (req, res, next) => {
+router.get('/export/orders.csv', requires('orders'), async (req, res, next) => {
   try {
     const orders = await Order.find().populate('user', 'name email').sort({ createdAt: -1 });
     sendCsv(res, 'orders.csv', csv(
@@ -234,7 +387,7 @@ router.get('/export/orders.csv', async (req, res, next) => {
 // A row whose name + brand already exists updates that product's price, stock, category, description and image.
 const MAX_IMPORT_ROWS = 500;
 
-router.post('/import/products', async (req, res, next) => {
+router.post('/import/products', requires('products'), async (req, res, next) => {
   try {
     if (typeof req.body.csv !== 'string' || !req.body.csv.trim()) {
       res.status(400);
@@ -287,7 +440,7 @@ router.post('/import/products', async (req, res, next) => {
   }
 });
 
-router.get('/export/products.csv', async (req, res, next) => {
+router.get('/export/products.csv', requires('products'), async (req, res, next) => {
   try {
     const products = await Product.find().select('-reviews').sort({ name: 1 });
     sendCsv(res, 'products.csv', csv(
