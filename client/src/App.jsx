@@ -21,6 +21,9 @@ import AdminProducts from './pages/admin/Products.jsx';
 import ProductForm from './pages/admin/ProductForm.jsx';
 import AdminOrders from './pages/admin/AdminOrders.jsx';
 import Users from './pages/admin/Users.jsx';
+import Categories from './pages/admin/Categories.jsx';
+import Compare from './pages/Compare.jsx';
+import CompareBar from './components/CompareBar.jsx';
 
 export default function App() {
   const { notice } = useCart();
@@ -33,6 +36,7 @@ export default function App() {
           <Route path="/shop" element={<Shop />} />
           <Route path="/product/:id" element={<ProductPage />} />
           <Route path="/cart" element={<Cart />} />
+          <Route path="/compare" element={<Compare />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -51,6 +55,7 @@ export default function App() {
             <Route path="products" element={<AdminProducts />} />
             <Route path="products/new" element={<ProductForm />} />
             <Route path="products/:id" element={<ProductForm />} />
+            <Route path="categories" element={<Categories />} />
             <Route path="orders" element={<AdminOrders />} />
             <Route path="coupons" element={<Coupons />} />
             <Route path="users" element={<Users />} />
@@ -59,6 +64,7 @@ export default function App() {
         </Routes>
       </main>
 
+      <CompareBar />
       {notice && (
         <div className="toast" role="status" key={notice.id}>
           <Check width={18} height={18} /> {notice.name} added to cart <Link to="/cart">View cart</Link>

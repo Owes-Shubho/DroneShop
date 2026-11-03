@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
+import useCategories from '../useCategories.js';
 import { ProductCard, Loader, ErrorMsg } from '../components/Bits.jsx';
 
-const categories = ['All', 'Camera Drones', 'Racing Drones', 'Toy Drones', 'Industrial Drones', 'Accessories'];
-
 export default function Shop() {
+  const categories = ['All', ...useCategories().map((c) => c.name)];
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');

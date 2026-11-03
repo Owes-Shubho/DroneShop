@@ -3,6 +3,8 @@ import User from '../models/User.js';
 import Product from '../models/Product.js';
 import Order from '../models/Order.js';
 import Coupon from '../models/Coupon.js';
+import Category from '../models/Category.js';
+import { parseCsv } from '../utils/csvParse.js';
 import { protect, admin } from '../middleware/auth.js';
 
 const router = Router();
@@ -22,12 +24,12 @@ router.get('/stats', async (req, res, next) => {
         Product.countDocuments(),
         User.countDocuments(),
         Order.aggregate([
-          { $match: { status: { $ne: 'Cancelled' } } },
+          { $match: { status: { $ne: 'Cancelled' }, isRefunded: { $ne: true } } },
           { $group: { _id: null, revenue: { $sum: '$totalPrice' } } },
         ]),
         Order.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
         Order.aggregate([
-          { $match: { createdAt: { $gte: since }, status: { $ne: 'Cancelled' } } },
+          { $match: { createdAt: { $gte: since }, status: { $ne: 'Cancelled' }, isRefunded: { $ne: true } } },
           {
             $group: {
               _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -37,7 +39,7 @@ router.get('/stats', async (req, res, next) => {
           },
         ]),
         Order.aggregate([
-          { $match: { status: { $ne: 'Cancelled' } } },
+          { $match: { status: { $ne: 'Cancelled' }, isRefunded: { $ne: true } } },
           { $unwind: '$items' },
           {
             $group: {
@@ -222,6 +224,64 @@ router.get('/export/orders.csv', async (req, res, next) => {
         o.coupon?.code, o.tracking?.number,
       ])
     ));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ----- CSV import -----
+// Columns (header row required): name, brand, category, price, stock, description; optional: image.
+// A row whose name + brand already exists updates that product's price, stock, category, description and image.
+const MAX_IMPORT_ROWS = 500;
+
+router.post('/import/products', async (req, res, next) => {
+  try {
+    if (typeof req.body.csv !== 'string' || !req.body.csv.trim()) {
+      res.status(400);
+      throw new Error('Choose a CSV file to import');
+    }
+    const [head, ...rows] = parseCsv(req.body.csv);
+    const cols = head.map((h) => h.trim().toLowerCase());
+    const missing = ['name', 'brand', 'category', 'price', 'stock', 'description'].filter((c) => !cols.includes(c));
+    if (missing.length) {
+      res.status(400);
+      throw new Error(`Missing column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      res.status(400);
+      throw new Error(`Import up to ${MAX_IMPORT_ROWS} rows at a time`);
+    }
+
+    const known = new Set((await Category.find().select('name')).map((c) => c.name));
+    const result = { created: 0, updated: 0, errors: [] };
+    for (const [n, r] of rows.entries()) {
+      const row = Object.fromEntries(cols.map((c, i) => [c, (r[i] ?? '').trim()]));
+      const line = n + 2; // header is line 1
+      const price = Number(row.price);
+      const stock = Number(row.stock);
+      const problem =
+        !row.name || !row.brand || !row.description ? 'name, brand and description are required'
+        : !known.has(row.category) ? `unknown category "${row.category}"`
+        : !(price >= 0) || row.price === '' ? 'price must be a number, 0 or more'
+        : !Number.isInteger(stock) || stock < 0 || row.stock === '' ? 'stock must be a whole number, 0 or more'
+        : row.image && !/^(https?:\/\/|\/)/i.test(row.image) ? 'image must be a URL or a path starting with /'
+        : '';
+      if (problem) {
+        result.errors.push({ line, message: problem });
+        continue;
+      }
+      const data = { category: row.category, price, countInStock: stock, description: row.description, ...(row.image ? { image: row.image } : {}) };
+      const existing = await Product.findOne({ name: row.name, brand: row.brand });
+      if (existing) {
+        existing.set(data);
+        await existing.save();
+        result.updated++;
+      } else {
+        await Product.create({ name: row.name, brand: row.brand, ...data });
+        result.created++;
+      }
+    }
+    res.json(result);
   } catch (err) {
     next(err);
   }

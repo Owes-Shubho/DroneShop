@@ -12,6 +12,7 @@ const { default: User } = await import('../models/User.js');
 const { default: Product } = await import('../models/Product.js');
 const { default: Coupon } = await import('../models/Coupon.js');
 const { default: Order } = await import('../models/Order.js');
+const { default: Category } = await import('../models/Category.js');
 const { totals, couponProblem } = await import('../utils/pricing.js');
 
 const MONGO = process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/droneshop_test';
@@ -36,7 +37,8 @@ before(async () => {
   assert.ok(dbName.endsWith('_test'), `Refusing to wipe "${dbName}": test database name must end in _test`);
   await mongoose.connect(MONGO);
   await mongoose.connection.dropDatabase();
-  await Promise.all([User.init(), Product.init(), Coupon.init(), Order.init()]);
+  await Promise.all([User.init(), Product.init(), Coupon.init(), Order.init(), Category.init()]);
+  await Category.create(['Camera Drones', 'Toy Drones', 'Accessories'].map((name) => ({ name })));
 
   await User.create({ name: 'Admin', email: 'admin@test.com', password: 'admin123', isAdmin: true });
   await User.create({ name: 'Alice', email: 'alice@test.com', password: 'alice123' });
@@ -351,3 +353,114 @@ describe('platform', () => {
     assert.ok(r.body.message);
   });
 });
+
+describe('categories, related, cart, returns, import', () => {
+  test('categories: public list, admin CRUD, rename moves products, delete blocked while used', async () => {
+    const list = await api('/api/categories');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.find((c) => c.name === 'Camera Drones').productCount >= 1);
+    assert.equal((await api('/api/categories', { method: 'POST', token: aliceToken, body: { name: 'X' } })).status, 403);
+    const made = await api('/api/categories', { method: 'POST', token: adminToken, body: { name: 'Batteries' } });
+    assert.equal(made.status, 201);
+    assert.equal((await api('/api/categories', { method: 'POST', token: adminToken, body: { name: 'Batteries' } })).status, 400, 'duplicate');
+    assert.equal((await api('/api/categories', { method: 'POST', token: adminToken, body: { name: '  ' } })).status, 400);
+
+    const p = await api('/api/products', { method: 'POST', token: adminToken, body: { name: 'Pack', brand: 'B', category: 'Batteries', description: 'd', price: 5, countInStock: 1 } });
+    assert.equal(p.status, 201);
+    assert.equal((await api('/api/products', { method: 'POST', token: adminToken, body: { name: 'Bad', brand: 'B', category: 'Nope', description: 'd', price: 5, countInStock: 1 } })).status, 400, 'unknown category');
+    assert.equal((await api(`/api/categories/${made.body._id}`, { method: 'DELETE', token: adminToken })).status, 400, 'in use');
+    assert.equal((await api(`/api/categories/${made.body._id}`, { method: 'PUT', token: adminToken, body: { name: 'Battery Packs' } })).status, 200);
+    assert.equal((await api(`/api/products/${p.body._id}`)).body.category, 'Battery Packs');
+    await api(`/api/products/${p.body._id}`, { method: 'DELETE', token: adminToken });
+    assert.equal((await api(`/api/categories/${made.body._id}`, { method: 'DELETE', token: adminToken })).status, 200);
+  });
+
+  test('related products and by-ids', async () => {
+    const mate = await Product.create({ name: 'Mate', brand: 'T', category: 'Camera Drones', description: 'd', price: 700, countInStock: 1 });
+    const rel = await api(`/api/products/${drone._id}/related`);
+    assert.equal(rel.status, 200);
+    assert.ok(rel.body.some((p) => p._id === String(mate._id)));
+    assert.ok(!rel.body.some((p) => p._id === String(drone._id)), 'not itself');
+    assert.deepEqual((await api('/api/products/nope/related')).body, []);
+    const ids = `${cheap._id},bad,${drone._id}`;
+    assert.deepEqual((await api(`/api/products/by-ids?ids=${ids}`)).body.map((p) => p._id), [String(cheap._id), String(drone._id)]);
+  });
+
+  test('saved cart: requires login, merges duplicates, drops unknown items', async () => {
+    assert.equal((await api('/api/account/cart')).status, 401);
+    const put = await api('/api/account/cart', { method: 'PUT', token: bobToken, body: { items: [
+      { product: String(cheap._id), qty: 2 }, { product: String(cheap._id), qty: 1 }, { product: 'junk', qty: 1 }, { product: String(drone._id), qty: 0 },
+    ] } });
+    assert.equal(put.status, 200);
+    assert.equal(put.body.length, 1);
+    assert.equal(put.body[0].qty, 3);
+    assert.equal(put.body[0].price, 20);
+    assert.equal((await api('/api/account/cart', { token: bobToken })).body[0].product, String(cheap._id));
+    assert.equal((await api('/api/account/cart', { method: 'PUT', token: bobToken, body: { items: 'x' } })).status, 400);
+    assert.deepEqual((await api('/api/account/cart', { method: 'PUT', token: bobToken, body: { items: [] } })).body, []);
+  });
+
+  test('returns: delivered only, one request, admin decides, refund restocks', async () => {
+    const o = await order(aliceToken, [{ product: String(cheap._id), qty: 2 }]);
+    const id = o.body._id;
+    const ask = (token, reason) => api(`/api/orders/${id}/return`, { method: 'POST', token, body: { reason } });
+    assert.equal((await ask(aliceToken, 'too early please')).status, 400, 'not delivered yet');
+    await api(`/api/orders/${id}/status`, { method: 'PUT', token: adminToken, body: { status: 'Delivered' } });
+    assert.equal((await ask(bobToken, 'not my order')).status, 404);
+    assert.equal((await ask(aliceToken, 'no')).status, 400, 'reason too short');
+    const r = await ask(aliceToken, 'Arrived damaged');
+    assert.equal(r.status, 201);
+    assert.equal(r.body.returnRequest.status, 'Requested');
+    assert.equal((await ask(aliceToken, 'again please')).status, 400, 'only one request');
+
+    const decide = (token, decision, note) => api(`/api/orders/${id}/return`, { method: 'PUT', token, body: { decision, note } });
+    assert.equal((await decide(aliceToken, 'refund')).status, 403);
+    assert.equal((await decide(adminToken, 'bogus')).status, 400);
+    assert.equal((await decide(adminToken, 'approve', 'Send it back')).body.returnRequest.status, 'Approved');
+    assert.equal((await decide(adminToken, 'reject')).status, 400, 'approved return cannot be rejected');
+    const stockBefore = (await Product.findById(cheap._id)).countInStock;
+    const refund = await decide(adminToken, 'refund');
+    assert.equal(refund.body.returnRequest.status, 'Refunded');
+    assert.equal(refund.body.isRefunded, true);
+    assert.equal((await Product.findById(cheap._id)).countInStock, stockBefore + 2, 'items back in stock');
+    assert.equal((await decide(adminToken, 'refund')).status, 400, 'no double refund');
+  });
+
+  test('return window closes after 30 days', async () => {
+    const o = await order(aliceToken, [{ product: String(cheap._id), qty: 1 }]);
+    await api(`/api/orders/${o.body._id}/status`, { method: 'PUT', token: adminToken, body: { status: 'Delivered' } });
+    await Order.updateOne({ _id: o.body._id }, { deliveredAt: new Date(Date.now() - 31 * 86400000) });
+    const r = await api(`/api/orders/${o.body._id}/return`, { method: 'POST', token: aliceToken, body: { reason: 'Changed my mind' } });
+    assert.equal(r.status, 400);
+    assert.match(r.body.message, /window/);
+  });
+
+  test('product CSV import: creates, updates, reports row errors, handles quotes', async () => {
+    const csv = [
+      'Name,Brand,Category,Price,Stock,Description,Image',
+      'Imported A,Acme,Toy Drones,19.99,5,"Small, light ""fun"" drone",/images/a.jpg',
+      'Imported B,Acme,Nope,10,1,desc,',
+      'Imported C,Acme,Toy Drones,abc,1,desc,',
+      'Imported D,Acme,Toy Drones,10,1.5,desc,',
+      'Imported E,Acme,Toy Drones,10,1,desc,javascript:alert(1)',
+    ].join('\r\n');
+    assert.equal((await api('/api/admin/import/products', { method: 'POST', token: aliceToken, body: { csv } })).status, 403);
+    const r = await api('/api/admin/import/products', { method: 'POST', token: adminToken, body: { csv } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.created, 1);
+    assert.deepEqual(r.body.errors.map((e) => e.line), [3, 4, 5, 6]);
+    const a = await Product.findOne({ name: 'Imported A' });
+    assert.equal(a.description, 'Small, light "fun" drone');
+
+    const again = await api('/api/admin/import/products', { method: 'POST', token: adminToken, body: { csv: 'name,brand,category,price,stock,description\nImported A,Acme,Toy Drones,25,9,New text' } });
+    assert.equal(again.body.updated, 1);
+    assert.equal(again.body.created, 0);
+    const a2 = await Product.findOne({ name: 'Imported A' });
+    assert.equal(a2.price, 25);
+    assert.equal(a2.countInStock, 9);
+
+    assert.equal((await api('/api/admin/import/products', { method: 'POST', token: adminToken, body: { csv: 'name,brand\nx,y' } })).status, 400, 'missing columns');
+    assert.equal((await api('/api/admin/import/products', { method: 'POST', token: adminToken, body: {} })).status, 400);
+  });
+});
+

@@ -38,7 +38,18 @@ export default function AdminOrders() {
     } catch (err) { setError(err.message); }
   };
 
-  const exportCsv = () => download('/admin/export/orders.csv', 'orders.csv', user.token).catch((e) => setError(e.message));
+  const decide = async (o, decision) => {
+    if (decision === 'refund' && !confirm(`Refund ${money(o.totalPrice)} and put the items back in stock?`)) return;
+    const note = decision === 'refund' ? '' : (prompt('Message to the customer (optional)') ?? null);
+    if (note === null) return;
+    setError('');
+    try {
+      await api(`/orders/${o._id}/return`, { method: 'PUT', token: user.token, body: { decision, note } });
+      load();
+    } catch (err) { setError(err.message); }
+  };
+
+  const exportCsv =() => download('/admin/export/orders.csv', 'orders.csv', user.token).catch((e) => setError(e.message));
 
   return (
     <>
@@ -69,9 +80,9 @@ export default function AdminOrders() {
 
       {!orders && !error ? <Loader /> : (
         <table className="table">
-          <thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Paid</th><th>Status</th><th>Shipment</th></tr></thead>
+          <thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Paid</th><th>Status</th><th>Shipment</th><th>Return</th></tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan="8" className="muted">No orders.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan="9" className="muted">No orders.</td></tr>}
             {rows.map((o) => (
               <tr key={o._id}>
                 <td><Link to={`/orders/${o._id}`}>{o._id.slice(-8)}</Link></td>
@@ -91,6 +102,21 @@ export default function AdminOrders() {
                       {o.tracking?.number ? o.tracking.number : 'Add tracking'}
                     </button>
                   )}
+                </td>
+                <td>
+                  {o.returnRequest?.status ? (
+                    <>
+                      <span className={`badge ${o.returnRequest.status}`}>{o.returnRequest.status}</span>
+                      <br /><small className="muted" title={o.returnRequest.reason}>{o.returnRequest.reason.slice(0, 40)}</small>
+                      <div className="row gap">
+                        {o.returnRequest.status === 'Requested' && <>
+                          <button className="link" onClick={() => decide(o, 'approve')}>Approve</button>
+                          <button className="link danger" onClick={() => decide(o, 'reject')}>Reject</button>
+                        </>}
+                        {['Requested', 'Approved'].includes(o.returnRequest.status) && <button className="link" onClick={() => decide(o, 'refund')}>Refund</button>}
+                      </div>
+                    </>
+                  ) : '—'}
                 </td>
               </tr>
             ))}

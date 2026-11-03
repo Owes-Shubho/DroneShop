@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api.js';
+import useCategories from '../../useCategories.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { DroneImage, Loader, ErrorMsg } from '../../components/Bits.jsx';
 
-const categories = ['Camera Drones', 'Racing Drones', 'Toy Drones', 'Industrial Drones', 'Accessories'];
 const blank = {
-  name: '', brand: '', category: categories[0], description: '', image: '', images: [], price: '', countInStock: '',
+  name: '', brand: '', category: '', description: '', image: '', images: [], price: '', countInStock: '',
   specs: { flightTime: '', range: '', camera: '', weight: '' },
 };
 
@@ -19,6 +19,7 @@ export default function ProductForm() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const categories = useCategories().map((c) => c.name);
 
   useEffect(() => {
     if (!editing) return;
@@ -83,7 +84,10 @@ export default function ProductForm() {
           <div className="two">
             <label>Brand<input required value={f.brand} onChange={set('brand')} /></label>
             <label>Category
-              <select value={f.category} onChange={set('category')}>{categories.map((c) => <option key={c}>{c}</option>)}</select>
+              <select required value={f.category} onChange={set('category')}>
+                <option value="" disabled>Choose…</option>
+                {categories.map((c) => <option key={c}>{c}</option>)}
+              </select>
             </label>
           </div>
           <div className="two">

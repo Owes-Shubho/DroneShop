@@ -147,4 +147,44 @@ router.delete('/wishlist/:productId', async (req, res, next) => {
   }
 });
 
+// ----- saved cart (syncs across devices) -----
+// Returns the cart in the shape the client keeps, with current prices and stock.
+async function cartView(userId) {
+  const user = await User.findById(userId).populate('cart.product', 'name image price countInStock');
+  return user.cart
+    .filter((l) => l.product && l.product.countInStock > 0)
+    .map((l) => ({
+      product: String(l.product._id), name: l.product.name, image: l.product.image, price: l.product.price,
+      countInStock: l.product.countInStock, qty: Math.min(l.qty, l.product.countInStock),
+    }));
+}
+
+router.get('/cart', async (req, res, next) => {
+  try {
+    res.json(await cartView(req.user._id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/cart', async (req, res, next) => {
+  try {
+    const items = req.body.items;
+    if (!Array.isArray(items) || items.length > 50) throw bad(res, 'Invalid cart');
+    const lines = new Map();
+    for (const i of items) {
+      const qty = Math.floor(Number(i?.qty));
+      if (!mongoose.isValidObjectId(i?.product) || !(qty >= 1)) continue;
+      lines.set(String(i.product), Math.min((lines.get(String(i.product)) || 0) + qty, 99));
+    }
+    const existing = await Product.find({ _id: { $in: [...lines.keys()] } }).select('_id');
+    const ok = new Set(existing.map((p) => String(p._id)));
+    const cart = [...lines].filter(([id]) => ok.has(id)).map(([product, qty]) => ({ product, qty }));
+    await User.updateOne({ _id: req.user._id }, { cart });
+    res.json(await cartView(req.user._id));
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

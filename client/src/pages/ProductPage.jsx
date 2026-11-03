@@ -4,7 +4,7 @@ import { api, money } from '../api.js';
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useWishlist } from '../context/WishlistContext.jsx';
-import { DroneImage, Stars, Loader, ErrorMsg } from '../components/Bits.jsx';
+import { DroneImage, Stars, Loader, ErrorMsg, ProductCard } from '../components/Bits.jsx';
 import { Check, Heart } from '../components/Icons.jsx';
 import useTitle from '../useTitle.js';
 
@@ -23,8 +23,22 @@ export default function ProductPage() {
   const [reviewError, setReviewError] = useState('');
   useTitle(p?.name, p && `${p.name} by ${p.brand} — ${p.description}`.slice(0, 155));
 
+  const [related, setRelated] = useState([]);
+  const [recent, setRecent] = useState([]);
+
   const load = () => api(`/products/${id}`).then(setP).catch((e) => setError(e.message));
   useEffect(() => { setShown(0); setQty(1); load(); }, [id]);
+
+  // Related products, plus the products viewed before this one (kept in this browser only).
+  useEffect(() => {
+    let before = [];
+    try { before = (JSON.parse(localStorage.getItem('recent')) || []).filter((x) => typeof x === 'string'); } catch { /* ignore */ }
+    try { localStorage.setItem('recent', JSON.stringify([id, ...before.filter((x) => x !== id)].slice(0, 9))); } catch { /* storage unavailable */ }
+    const others = before.filter((x) => x !== id).slice(0, 4);
+    api(`/products/${id}/related`).then(setRelated).catch(() => setRelated([]));
+    if (others.length) api(`/products/by-ids?ids=${others.join(',')}`).then(setRecent).catch(() => setRecent([]));
+    else setRecent([]);
+  }, [id]);
 
   const submitReview = async (e) => {
     e.preventDefault();
@@ -115,6 +129,19 @@ export default function ProductPage() {
           </ul>
         </div>
       </div>
+
+      {related.length > 0 && (
+        <section>
+          <h2>You may also like</h2>
+          <div className="grid">{related.map((r) => <ProductCard key={r._id} p={r} />)}</div>
+        </section>
+      )}
+      {recent.length > 0 && (
+        <section>
+          <h2>Recently viewed</h2>
+          <div className="grid">{recent.map((r) => <ProductCard key={r._id} p={r} />)}</div>
+        </section>
+      )}
 
       <h2>Reviews</h2>
       {p.reviews.length === 0 && <p className="muted">No reviews yet.</p>}

@@ -46,6 +46,8 @@ export function OrderDetail() {
   const [o, setO] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState('');
   useTitle(o ? `Order ${o._id.slice(-8)}` : 'Order');
 
   useEffect(() => {
@@ -66,8 +68,25 @@ export function OrderDetail() {
     }
   };
 
+  const requestReturn = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await api(`/orders/${id}/return`, { method: 'POST', token: user.token, body: { reason } });
+      setO((cur) => ({ ...cur, ...updated, user: cur.user }));
+      setAsking(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!o) return error ? <ErrorMsg error={error} /> : <Loader />;
   const a = o.shippingAddress;
+  const rr = o.returnRequest;
+  const mine = o.user?._id === user._id;
   const t = o.tracking;
   const safeTrackUrl = t?.url && /^https?:\/\//i.test(t.url) ? t.url : null;
 
@@ -77,13 +96,35 @@ export function OrderDetail() {
         <h1>Order {o._id.slice(-8)}</h1>
         <div className="row gap">
           <Link to={`/orders/${o._id}/invoice`} className="btn ghost small">Invoice</Link>
-          {o.status === 'Processing' && o.user?._id === user._id && (
+          {o.status === 'Processing' && mine && (
             <button className="btn ghost small" onClick={cancel} disabled={busy}>Cancel order</button>
+          )}
+          {o.status === 'Delivered' && mine && !rr?.status && !asking && (
+            <button className="btn ghost small" onClick={() => setAsking(true)}>Return items</button>
           )}
         </div>
       </div>
       <ErrorMsg error={error} />
       <p><span className={`badge ${o.status}`}>{o.status}</span> · Placed {new Date(o.createdAt).toLocaleString()}</p>
+
+      {asking && (
+        <form className="panel pform-inline" onSubmit={requestReturn}>
+          <h3>Return this order</h3>
+          <label>Why are you returning it?
+            <textarea required minLength={5} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Damaged, wrong item, changed my mind…" />
+          </label>
+          <p className="muted">Returns are accepted within 30 days of delivery. We will review your request and reply here.</p>
+          <div className="row gap"><button className="btn" disabled={busy}>Send request</button><button type="button" className="btn ghost" onClick={() => setAsking(false)}>Cancel</button></div>
+        </form>
+      )}
+      {rr?.status && (
+        <div className="panel">
+          <h3>Return <span className={`badge ${rr.status}`}>{rr.status}</span></h3>
+          <p>Your reason: {rr.reason}</p>
+          {rr.note && <p>Store reply: {rr.note}</p>}
+          {rr.status === 'Refunded' && <p>Refunded {money(o.totalPrice)}.</p>}
+        </div>
+      )}
 
       {t?.number && (
         <div className="panel tracking">

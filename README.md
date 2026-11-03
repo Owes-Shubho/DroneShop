@@ -40,9 +40,10 @@ npm run client   # App on http://localhost:5173
 | `GET /api/orders`, `PUT /api/orders/:id/status` | admin |
 
 ## More features
-- Accounts: profile, change/reset password, saved addresses, wishlist
-- Checkout: coupon codes, server-calculated totals, order cancel while processing, tracking numbers, printable invoice
-- Admin (`/admin`): overview, products with image upload, orders and shipments, coupons, customers, CSV export
+- Accounts: profile, change/reset password, saved addresses, wishlist, cart saved to the account (merged on sign-in)
+- Shopping: related products, recently viewed, side-by-side compare (up to 4), editable categories
+- Checkout: coupon codes, server-calculated totals, order cancel while processing, tracking numbers, printable invoice, return requests within 30 days with approve / reject / refund
+- Admin (`/admin`): overview, products with image upload, orders and shipments, categories, coupons, customers, CSV export and import of products
 - Static pages (About, Shipping, Returns, Privacy, Terms, Contact) — **starter text, review before launch**
 
 ## Email

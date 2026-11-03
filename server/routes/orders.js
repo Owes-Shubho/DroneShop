@@ -165,6 +165,51 @@ router.put('/:id/cancel', protect, async (req, res, next) => {
   }
 });
 
+const RETURN_WINDOW_DAYS = 30;
+
+// Customer asks to return a delivered order (within 30 days of delivery).
+router.post('/:id/return', protect, async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order || !order.user.equals(req.user._id)) throw fail(res, 404, 'Order not found');
+    if (order.status !== 'Delivered') throw fail(res, 400, 'Only delivered orders can be returned');
+    if (order.returnRequest?.status) throw fail(res, 400, 'A return was already requested for this order');
+    const since = order.deliveredAt || order.updatedAt;
+    if (Date.now() - since.getTime() > RETURN_WINDOW_DAYS * 86400000) throw fail(res, 400, `The ${RETURN_WINDOW_DAYS}-day return window has passed`);
+    const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 5 || reason.length > 500) throw fail(res, 400, 'Tell us why you are returning it (5–500 characters)');
+    order.returnRequest = { reason, status: 'Requested', requestedAt: new Date() };
+    await order.save();
+    res.status(201).json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin decision: approve, reject, or refund (refund puts the items back in stock).
+router.put('/:id/return', protect, admin, async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) throw fail(res, 404, 'Order not found');
+    const rr = order.returnRequest;
+    if (!rr?.status) throw fail(res, 400, 'No return was requested for this order');
+    const { decision } = req.body;
+    const allowed = { Requested: ['approve', 'reject', 'refund'], Approved: ['refund'] }[rr.status] || [];
+    if (!allowed.includes(decision)) throw fail(res, 400, `A ${rr.status.toLowerCase()} return cannot be ${decision}d`);
+    if (decision === 'refund') {
+      await releaseStock(order.items);
+      order.isRefunded = true;
+    }
+    rr.status = { approve: 'Approved', reject: 'Rejected', refund: 'Refunded' }[decision];
+    rr.resolvedAt = new Date();
+    if (typeof req.body.note === 'string') rr.note = req.body.note.trim().slice(0, 500);
+    await order.save();
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.put('/:id/status', protect, admin, async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -180,9 +225,12 @@ router.put('/:id/status', protect, admin, async (req, res, next) => {
     }
     order.status = status;
     if (status === 'Shipped') order.shippedAt = new Date();
-    if (status === 'Delivered' && !order.isPaid) {
-      order.isPaid = true;
-      order.paidAt = new Date();
+    if (status === 'Delivered') {
+      order.deliveredAt = new Date();
+      if (!order.isPaid) {
+        order.isPaid = true;
+        order.paidAt = new Date();
+      }
     }
     await order.save();
     if (status === 'Shipped') {

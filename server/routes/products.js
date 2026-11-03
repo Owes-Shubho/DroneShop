@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import Product from '../models/Product.js';
+import Category from '../models/Category.js';
 import { protect, admin } from '../middleware/auth.js';
 
 const router = Router();
@@ -54,6 +56,33 @@ router.get('/top', async (req, res, next) => {
   }
 });
 
+// Several products by id, in the order requested (recently viewed, compare).
+router.get('/by-ids', async (req, res, next) => {
+  try {
+    const ids = String(req.query.ids || '').split(',').filter((i) => mongoose.isValidObjectId(i)).slice(0, 8);
+    const found = await Product.find({ _id: { $in: ids } }).select('-reviews');
+    res.json(ids.map((id) => found.find((p) => String(p._id) === id)).filter(Boolean));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id/related', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.json([]);
+    const product = await Product.findById(req.params.id).select('category brand');
+    if (!product) return res.json([]);
+    // Same category first, topped up with the same brand.
+    const same = await Product.find({ _id: { $ne: product._id }, category: product.category }).select('-reviews').sort({ rating: -1 }).limit(4);
+    if (same.length >= 4) return res.json(same);
+    const more = await Product.find({ _id: { $nin: [product._id, ...same.map((p) => p._id)] }, brand: product.brand })
+      .select('-reviews').sort({ rating: -1 }).limit(4 - same.length);
+    res.json([...same, ...more]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -67,9 +96,19 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+async function checkCategory(data, res) {
+  if (data.category === undefined) return;
+  if (!(await Category.exists({ name: String(data.category).trim() }))) {
+    res.status(400);
+    throw new Error('Unknown category. Add it under Categories first.');
+  }
+}
+
 router.post('/', protect, admin, async (req, res, next) => {
   try {
-    res.status(201).json(await Product.create(clean(req.body)));
+    const data = clean(req.body);
+    await checkCategory(data, res);
+    res.status(201).json(await Product.create(data));
   } catch (err) {
     next(err);
   }
@@ -77,7 +116,9 @@ router.post('/', protect, admin, async (req, res, next) => {
 
 router.put('/:id', protect, admin, async (req, res, next) => {
   try {
-    const product = await Product.findByIdAndUpdate(req.params.id, clean(req.body), {
+    const data = clean(req.body);
+    await checkCategory(data, res);
+    const product = await Product.findByIdAndUpdate(req.params.id, data, {
       new: true,
       runValidators: true,
     });

@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
     isAdmin: { type: Boolean, default: false },
     addresses: [addressSchema],
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+    cart: [{ _id: false, product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' }, qty: { type: Number, min: 1 } }],
     resetTokenHash: { type: String, select: false },
     resetTokenExpires: { type: Date, select: false },
   },

@@ -4,6 +4,7 @@ import { useCart } from '../context/CartContext.jsx';
 import { money } from '../api.js';
 import { Drone, Heart } from './Icons.jsx';
 import { useWishlist } from '../context/WishlistContext.jsx';
+import { useCompare, MAX_COMPARE } from '../context/CompareContext.jsx';
 import { useNavigate } from 'react-router-dom';
 
 export function DroneImage({ src, name }) {
@@ -29,6 +30,8 @@ export function Stars({ value = 0, count }) {
 export function ProductCard({ p }) {
   const { add } = useCart();
   const wish = useWishlist();
+  const compare = useCompare();
+  const comparing = compare.has(p._id);
   const nav = useNavigate();
   const saved = wish.has(p._id);
   const out = p.countInStock === 0;
@@ -52,6 +55,11 @@ export function ProductCard({ p }) {
         <span className="eyebrow-sm">{p.brand}</span>
         <Link to={`/product/${p._id}`} className="card-title">{p.name}</Link>
         <Stars value={p.rating} />
+        <label className="compare-check">
+          <input type="checkbox" checked={comparing}
+            onChange={() => { if (!compare.toggle(p._id)) alert(`You can compare up to ${MAX_COMPARE} drones. Remove one first.`); }} />
+          Compare
+        </label>
         <div className="card-foot">
           <span className="price">{money(p.price)}</span>
           {!out && <button className="btn tint small" onClick={() => add(p)}>Add to cart</button>}

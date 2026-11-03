@@ -14,11 +14,7 @@ const productSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     brand: { type: String, required: true },
-    category: {
-      type: String,
-      required: true,
-      enum: ['Camera Drones', 'Racing Drones', 'Toy Drones', 'Industrial Drones', 'Accessories'],
-    },
+    category: { type: String, required: true, trim: true }, // must match a Category name; checked in the product routes
     description: { type: String, required: true },
     image: { type: String, default: '' },
     images: { type: [String], default: [] }, // extra gallery images; `image` stays the main one

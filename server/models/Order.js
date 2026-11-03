@@ -24,6 +24,15 @@ const orderSchema = new mongoose.Schema(
     discountPrice: { type: Number, default: 0 },
     tracking: { carrier: String, number: String, url: String },
     shippedAt: Date,
+    deliveredAt: Date,
+    returnRequest: {
+      reason: String,
+      status: { type: String, enum: ['Requested', 'Approved', 'Rejected', 'Refunded'] },
+      note: String, // admin's reply
+      requestedAt: Date,
+      resolvedAt: Date,
+    },
+    isRefunded: { type: Boolean, default: false },
     cancelledBy: { type: String, enum: ['customer', 'admin'] },
     itemsPrice: { type: Number, required: true },
     shippingPrice: { type: Number, required: true },

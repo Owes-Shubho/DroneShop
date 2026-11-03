@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, money, download } from '../../api.js';
+import useCategories from '../../useCategories.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { DroneImage, Loader, ErrorMsg } from '../../components/Bits.jsx';
-
-const categories = ['Camera Drones', 'Racing Drones', 'Toy Drones', 'Industrial Drones', 'Accessories'];
 
 async function loadAll() {
   const first = await api('/products?limit=50&sort=newest');
@@ -20,6 +19,8 @@ export default function Products() {
   const [list, setList] = useState(null);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
+  const [importResult, setImportResult] = useState(null);
+  const categories = useCategories().map((c) => c.name);
   const category = params.get('category') || '';
   const stock = params.get('stock') || '';
 
@@ -48,6 +49,17 @@ export default function Products() {
     } catch (err) { setError(err.message); }
   };
 
+  const importCsv = async (file) => {
+    if (!file) return;
+    setError('');
+    setImportResult(null);
+    try {
+      const result = await api('/admin/import/products', { method: 'POST', token: user.token, body: { csv: await file.text() } });
+      setImportResult(result);
+      load();
+    } catch (err) { setError(err.message); }
+  };
+
   const del = async (p) => {
     if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
     setError('');
@@ -62,6 +74,9 @@ export default function Products() {
       <div className="row between wrap gap">
         <h1>Products</h1>
         <div className="row gap">
+          <label className="btn ghost file-btn">Import CSV
+            <input type="file" accept=".csv,text/csv" hidden onChange={(e) => { importCsv(e.target.files[0]); e.target.value = ''; }} />
+          </label>
           <button className="btn ghost" onClick={() => download('/admin/export/products.csv', 'products.csv', user.token).catch((e) => setError(e.message))}>Export CSV</button>
           <Link to="/admin/products/new" className="btn">+ Add product</Link>
         </div>
@@ -81,6 +96,15 @@ export default function Products() {
       </div>
 
       <ErrorMsg error={error} />
+      {importResult && (
+        <div className="panel">
+          <strong>Import finished:</strong> {importResult.created} added, {importResult.updated} updated, {importResult.errors.length} skipped.
+          {importResult.errors.length > 0 && (
+            <ul>{importResult.errors.slice(0, 20).map((e) => <li key={e.line}>Line {e.line}: {e.message}</li>)}</ul>
+          )}
+        </div>
+      )}
+      <p className="muted">CSV import columns: name, brand, category, price, stock, description, image (optional). Rows matching an existing name and brand update that product.</p>
       {!list && !error ? <Loader /> : (
         <table className="table">
           <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th /></tr></thead>

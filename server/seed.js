@@ -4,6 +4,7 @@ import User from './models/User.js';
 import Product from './models/Product.js';
 import Order from './models/Order.js';
 import Coupon from './models/Coupon.js';
+import Category from './models/Category.js';
 
 const img = (f) => `/images/drones/${f}.jpg`;
 
@@ -65,7 +66,8 @@ const products = [
 ];
 
 await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/droneshop');
-await Promise.all([Order.deleteMany(), Product.deleteMany(), User.deleteMany(), Coupon.deleteMany()]);
+await Promise.all([Order.deleteMany(), Product.deleteMany(), User.deleteMany(), Coupon.deleteMany(), Category.deleteMany()]);
+await Category.insertMany([...new Set(products.map((p) => p.category))].map((name) => ({ name })));
 
 await User.create([
   { name: 'Admin', email: 'admin@droneshop.com', password: 'admin123', isAdmin: true },
