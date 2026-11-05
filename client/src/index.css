@@ -313,3 +313,7 @@ p.ok { color: var(--ok); }
 .hbar-track { background: var(--canvas-soft); border-radius: 6px; height: 14px; overflow: hidden; } .hbar { height: 100%; background: linear-gradient(to right, var(--store-blue), #6aa8ff); border-radius: 6px; }
 .table th.num, .table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media print { .admin-nav, .no-print, .tabs { display: none !important; } .admin { display: block; } .panel, .kpi { break-inside: avoid; } }
+
+/* catalogue */
+.attr-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.pform label small { display: block; margin-top: 4px; }

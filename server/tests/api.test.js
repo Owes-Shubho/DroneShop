@@ -13,6 +13,7 @@ const { default: Product } = await import('../models/Product.js');
 const { default: Coupon } = await import('../models/Coupon.js');
 const { default: Order } = await import('../models/Order.js');
 const { default: Category } = await import('../models/Category.js');
+const { default: Brand } = await import('../models/Brand.js');
 const { totals, couponProblem } = await import('../utils/pricing.js');
 
 const MONGO = process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/droneshop_test';
@@ -37,7 +38,8 @@ before(async () => {
   assert.ok(dbName.endsWith('_test'), `Refusing to wipe "${dbName}": test database name must end in _test`);
   await mongoose.connect(MONGO);
   await mongoose.connection.dropDatabase();
-  await Promise.all([User.init(), Product.init(), Coupon.init(), Order.init(), Category.init()]);
+  await Promise.all([User.init(), Product.init(), Coupon.init(), Order.init(), Category.init(), Brand.init()]);
+  await Brand.create(['T', 'B'].map((name) => ({ name })));
   await Category.create(['Camera Drones', 'Toy Drones', 'Accessories'].map((name) => ({ name })));
 
   await User.create({ name: 'Admin', email: 'admin@test.com', password: 'admin123', isAdmin: true });
@@ -700,13 +702,175 @@ describe('reports', () => {
     assert.match(r.headers.get('content-type'), /text\/csv/);
     assert.match(r.headers.get('content-disposition'), /report-products-\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2}\.csv/);
     const lines = r.body.replace(/^ï»¿/, '').split('\r\n');
-    assert.equal(lines[0], 'Product,Units sold,Orders,Revenue,Average price');
-    assert.ok(lines.some((l) => l.startsWith(`"'=HYPERLINK`)), 'formula neutralised');
+    assert.equal(lines[0], 'SKU,Product,Units sold,Orders,Revenue,Average price');
+    assert.ok(lines.some((l) => l.includes(`"'=HYPERLINK`)), 'formula neutralised');
     assert.ok(lines.slice(1).every((l) => !/'\d/.test(l.split(',').slice(-1)[0])), 'numbers not prefixed');
     const inv = await get('/inventory?format=csv', adminToken, true);
     assert.match(inv.headers.get('content-disposition'), /report-inventory-\d{4}-\d{2}-\d{2}\.csv/);
     const sales = await get('/sales?format=csv&group=month', adminToken, true);
     assert.ok(sales.body.includes('Month,Orders,Units'));
+  });
+});
+
+
+describe('catalogue: brands, SKU, cost, drone fields', () => {
+  const post = (body, token = adminToken) => api('/api/products', { method: 'POST', token, body });
+  const base = { name: 'Cat Drone', brand: 'T', category: 'Camera Drones', description: 'd', price: 100, countInStock: 3 };
+
+  test('brands: public list, admin CRUD, case-insensitive duplicates, rename moves products', async () => {
+    const list = await api('/api/brands');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.find((b) => b.name === 'T').productCount >= 1);
+    assert.equal((await api('/api/brands', { method: 'POST', token: aliceToken, body: { name: 'Nope' } })).status, 403);
+    const made = await api('/api/brands', { method: 'POST', token: adminToken, body: { name: 'Skyline', description: 'Test brand', logo: '/logo.png' } });
+    assert.equal(made.status, 201);
+    assert.equal((await api('/api/brands', { method: 'POST', token: adminToken, body: { name: 'SKYLINE' } })).status, 400, 'duplicate ignoring case');
+    assert.equal((await api('/api/brands', { method: 'POST', token: adminToken, body: { name: ' ' } })).status, 400);
+    assert.equal((await api('/api/brands', { method: 'POST', token: adminToken, body: { name: 'X', logo: 'javascript:alert(1)' } })).status, 400, 'logo must be a URL or path');
+
+    const p = await post({ ...base, name: 'Brand Mover', brand: 'skyline' });
+    assert.equal(p.status, 201);
+    assert.equal(p.body.brand, 'Skyline', 'stored with the brand\'s own spelling');
+    assert.equal((await api(`/api/brands/${made.body._id}`, { method: 'DELETE', token: adminToken })).status, 400, 'in use');
+    assert.equal((await api(`/api/brands/${made.body._id}`, { method: 'PUT', token: adminToken, body: { name: 'Skyline Pro' } })).status, 200);
+    assert.equal((await api(`/api/products/${p.body._id}`)).body.brand, 'Skyline Pro');
+    const filtered = await api('/api/products?brand=Skyline%20Pro');
+    assert.deepEqual(filtered.body.products.map((x) => x.name), ['Brand Mover']);
+    await api(`/api/products/${p.body._id}`, { method: 'DELETE', token: adminToken });
+    assert.equal((await api(`/api/brands/${made.body._id}`, { method: 'DELETE', token: adminToken })).status, 200);
+  });
+
+  test('products need a known brand', async () => {
+    assert.equal((await post({ ...base, brand: 'Ghost Co' })).status, 400);
+    assert.equal((await post({ ...base, brand: '' })).status, 400);
+  });
+
+  test('SKU is generated when blank, normalised, unique and validated', async () => {
+    const a = await post({ ...base, name: 'Auto SKU' });
+    assert.equal(a.status, 201);
+    assert.match(a.body.sku, /^T-[0-9A-F]{6}$/);
+    const b = await post({ ...base, name: 'Own SKU', sku: ' dji-test-01 ' });
+    assert.equal(b.body.sku, 'DJI-TEST-01');
+    const dup = await post({ ...base, name: 'Other', sku: 'dji-test-01' });
+    assert.equal(dup.status, 400);
+    assert.match(dup.body.message, /SKU is already used/);
+    assert.equal((await post({ ...base, name: 'Bad', sku: 'has space' })).status, 400);
+    assert.equal((await post({ ...base, name: 'Bad2', sku: 'x' })).status, 400, 'too short');
+    // update: SKU can change, may not collide, and a blank keeps the current one
+    assert.equal((await api(`/api/products/${a.body._id}`, { method: 'PUT', token: adminToken, body: { sku: 'DJI-TEST-01' } })).status, 400);
+    assert.equal((await api(`/api/products/${a.body._id}`, { method: 'PUT', token: adminToken, body: { sku: 'new-sku-7' } })).body.sku, 'NEW-SKU-7');
+    assert.equal((await api(`/api/products/${a.body._id}`, { method: 'PUT', token: adminToken, body: { sku: '', price: 5 } })).body.sku, 'NEW-SKU-7');
+    // a model-level create (no route) also gets one
+    const direct = await Product.create({ name: 'Direct', brand: 'T', category: 'Accessories', description: 'd', price: 1, countInStock: 1 });
+    assert.ok(direct.sku);
+  });
+
+  test('purchase cost is staff-only: never in public responses, present on the admin copy', async () => {
+    const p = await post({ ...base, name: 'Costly', costPrice: 60, sku: 'COST-1' });
+    assert.equal(p.status, 201);
+    const id = p.body._id;
+    const sees = (o) => JSON.stringify(o).includes('costPrice');
+    assert.equal(sees((await api(`/api/products/${id}`)).body), false);
+    assert.equal(sees((await api('/api/products?search=Costly')).body), false);
+    assert.equal(sees((await api('/api/products/top')).body), false);
+    assert.equal(sees((await api(`/api/products/${drone._id}/related`)).body), false);
+    assert.equal(sees((await api(`/api/products/by-ids?ids=${id}`)).body), false);
+    assert.equal(sees((await api(`/api/products/${id}`, { method: 'PUT', token: adminToken, body: { price: 101 } })).body), false, 'update response');
+    assert.equal(sees((await api('/api/orders', { method: 'POST', token: aliceToken, body: { items: [{ product: id, qty: 1 }], shippingAddress: address } })).body), false, 'order snapshot');
+    assert.equal((await api(`/api/products/${id}/admin`, { token: adminToken })).body.costPrice, 60);
+    assert.equal((await api(`/api/products/${id}/admin`, { token: aliceToken })).status, 403);
+    assert.equal((await api(`/api/products/${id}/admin`)).status, 401);
+    assert.equal((await post({ ...base, name: 'Neg', costPrice: -1 })).status, 400);
+    assert.equal((await post({ ...base, name: 'Blank cost', costPrice: '' })).status, 201, 'empty cost means not set');
+  });
+
+  test('drone fields: model, MPN, condition, warranty and cleaned technical attributes', async () => {
+    const r = await post({
+      ...base, name: 'Specced', modelNumber: 'M-100', mpn: 'MPN-9', condition: 'Refurbished', warrantyMonths: 24,
+      attributes: [{ label: ' Motor KV ', value: '2400' }, { label: '', value: 'x' }, { label: 'No value', value: ' ' }, { label: 'Battery', value: '1500 mAh' }, 'junk'],
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.condition, 'Refurbished');
+    assert.equal(r.body.warrantyMonths, 24);
+    assert.deepEqual(r.body.attributes, [{ label: 'Motor KV', value: '2400' }, { label: 'Battery', value: '1500 mAh' }]);
+    assert.equal((await post({ ...base, name: 'BadCond', condition: 'Used' })).status, 400);
+    assert.equal((await post({ ...base, name: 'BadAttr', attributes: 'x' })).status, 400);
+    assert.equal((await post({ ...base, name: 'Defaults' })).body.condition, 'New');
+  });
+
+  test('search finds a product by exact SKU', async () => {
+    await post({ ...base, name: 'Zzxq Findable', sku: 'FIND-ME-9' });
+    const r = await api('/api/products?search=find-me-9');
+    assert.deepEqual(r.body.products.map((p) => p.name), ['Zzxq Findable']);
+    assert.equal((await api('/api/products?search=Zzxq')).body.total, 1);
+  });
+
+  test('orders keep a SKU snapshot', async () => {
+    const o = await order(aliceToken, [{ product: String(drone._id), qty: 1 }]);
+    assert.equal(o.body.items[0].sku, (await Product.findById(drone._id)).sku);
+    await api(`/api/orders/${o.body._id}/cancel`, { method: 'PUT', token: aliceToken });
+  });
+
+  test('CSV import by SKU: updates by SKU, creates with SKU, new brands, cost, spec columns, duplicate SKUs', async () => {
+    const csv = [
+      'sku,name,brand,category,price,stock,description,cost,model,condition,warranty,spec:Motor KV,spec:Battery',
+      'IMP-001,Import One,Fresh Brand,Toy Drones,30,4,First,20,M1,New,12,2400,1500 mAh',
+      'IMP-002,Import Two,fresh brand,Toy Drones,40,5,Second,,,,,,',
+      'IMP-001,Import Dup,Fresh Brand,Toy Drones,31,4,Again,,,,,,',
+      'IMP-003,Import Bad,Fresh Brand,Toy Drones,10,1,Bad cond,,,Used,,,',
+      ',No Sku Import,Fresh Brand,Toy Drones,50,6,No sku given,,,,,,',
+    ].join('\n');
+    const r = await api('/api/admin/import/products', { method: 'POST', token: adminToken, body: { csv } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.created, 3);
+    assert.equal(r.body.brandsCreated, 1, 'Fresh Brand created once; "fresh brand" reuses it');
+    assert.deepEqual(r.body.errors.map((e) => e.line), [4, 5]);
+    assert.match(r.body.errors[0].message, /duplicate SKU IMP-001/);
+    assert.match(r.body.errors[1].message, /condition/);
+
+    const one = await Product.findOne({ sku: 'IMP-001' }).select('+costPrice');
+    assert.equal(one.costPrice, 20);
+    assert.equal(one.modelNumber, 'M1');
+    assert.equal(one.warrantyMonths, 12);
+    assert.deepEqual(one.attributes.map((a) => [a.label, a.value]), [['Motor KV', '2400'], ['Battery', '1500 mAh']]);
+    assert.equal((await Product.findOne({ sku: 'IMP-002' })).brand, 'Fresh Brand', 'brand spelling normalised');
+    const noSku = await Product.findOne({ name: 'No Sku Import' });
+    assert.match(noSku.sku, /^FRES-[0-9A-F]{6}$/);
+
+    // re-import: matched by SKU, even when the name changes
+    const again = await api('/api/admin/import/products', { method: 'POST', token: adminToken, body: { csv: 'sku,name,brand,category,price,stock,description\nimp-001,Import One Renamed,Fresh Brand,Toy Drones,35,9,Updated' } });
+    assert.deepEqual([again.body.created, again.body.updated], [0, 1]);
+    const upd = await Product.findOne({ sku: 'IMP-001' }).select('+costPrice');
+    assert.equal(upd.name, 'Import One Renamed');
+    assert.equal(upd.price, 35);
+    assert.equal(upd.costPrice, 20, 'cost kept when the column is absent');
+    // a SKU that belongs to another product cannot be taken over by renaming the row's match
+    assert.equal(await Product.countDocuments({ sku: 'IMP-001' }), 1);
+  });
+
+  test('backfill adds missing SKUs and brands to older data', async () => {
+    const { backfillCatalogue } = await import('../utils/catalogue.js');
+    await Product.collection.insertOne({ name: 'Legacy', brand: 'Legacy Co', category: 'Accessories', description: 'd', price: 1, countInStock: 1, reviews: [], images: [] });
+    const r = await backfillCatalogue();
+    assert.ok(r.skus >= 1 && r.brands >= 1);
+    const legacy = await Product.findOne({ name: 'Legacy' });
+    assert.match(legacy.sku, /^LEGA-/);
+    assert.ok(await Brand.findOne({ name: 'Legacy Co' }));
+    assert.deepEqual(await backfillCatalogue(), { brands: 0, skus: 0 }, 'second run changes nothing');
+  });
+
+  test('reports and exports carry SKU and cost', async () => {
+    const inv = await api('/api/admin/reports/inventory', { token: adminToken });
+    const costly = inv.body.rows.find((r) => r.sku === 'COST-1');
+    assert.equal(costly.cost, 60);
+    assert.equal(costly.margin, Math.round(((101 - 60) / 101) * 10000) / 100);
+    assert.equal(costly.costValue, 120, "cost x current stock (3 minus the 1 ordered)");
+    assert.equal(inv.body.rows.find((r) => r.cost === null).margin, null);
+    const csv = (await api('/api/admin/export/products.csv', { token: adminToken, raw: true })).body;
+    assert.ok(csv.replace(/^ï»¿/, '').startsWith('SKU,Name,Brand,Category,Price,Cost,Stock'));
+    assert.ok(csv.includes('COST-1'));
+    const prod = await api('/api/admin/reports/products', { token: adminToken });
+    assert.ok(prod.body.columns.some((c) => c.key === 'sku'));
   });
 });
 

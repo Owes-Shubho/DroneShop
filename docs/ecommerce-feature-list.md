@@ -10,7 +10,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
 | Product listing with images, price, brand | ✅ | P1 | Cards with stock tags |
-| Product detail page with description and specs | ✅ | P1 | Four spec fields (flight time, range, camera, weight) |
+| Product detail page with description and specs | ✅ | P1 | Four spec fields plus free-form technical attributes, model / part number, condition, warranty and SKU |
 | Categories | ✅ | P1 | Admin can add, rename (products move with it) and delete empty categories |
 | Search | 🟡 | P1 | Text search on name, brand, description; no typo tolerance or suggestions |
 | Filters (category, price range) | ✅ | P1 | Brand and rating filters missing |
@@ -80,7 +80,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Order list, filter, status change | ✅ | P1 | |
 | User management (list, search, filter, create, edit, suspend, reset password, delete) | ✅ | P2 | Users page and per-user detail page; cannot suspend, demote or delete your own account |
 | Best-seller report | ✅ | P2 | |
-| Category and brand management | 🟡 | P2 | Categories done; brands are free text |
+| Category and brand management | ✅ | P2 | Categories and brands: add, rename (products move), delete when unused |
 | Bulk import / export (CSV) | ✅ | P2 | Export orders and products (spreadsheet-safe); import products with per-row error report |
 | Review moderation | ✅ | P2 | Admins can remove a review from the product page |
 | Discount / coupon management | ✅ | P2 | Admin page: create, edit, turn on/off, delete |
@@ -106,7 +106,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
 | Server-side validation and error messages | 🟡 | P1 | Checks on auth, orders, coupons, uploads; no schema validation library |
-| Automated tests (API and UI) | 🟡 | P1 | 49 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles, reports); no UI tests |
+| Automated tests (API and UI) | 🟡 | P1 | 59 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles, reports); no UI tests |
 | Image optimisation and CDN | ⬜ | P2 | Images are served as uploaded |
 | Cloud file storage for uploads | ⬜ | P1 | Needed once the server is not a single machine |
 | Environment config and secrets | ✅ | P1 | `.env`, git-ignored |
@@ -118,5 +118,5 @@ A standard feature checklist for an online shop, with the current status of this
 ## Suggested build order (what is left)
 
 1. **Take real orders safely (P1):** online payments (needs a payment-provider account and keys), a real SMTP service for email, database backups, cloud storage for uploaded images.
-2. **Raise conversion (P2):** guest checkout, product variants, shipping zones/carrier rates and regional tax, brand management.
+2. **Raise conversion (P2):** guest checkout, product variants, shipping zones/carrier rates and regional tax.
 3. **Grow (P3):** two-factor login for admins, multi-currency and language.

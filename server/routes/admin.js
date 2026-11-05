@@ -8,6 +8,8 @@ import Product from '../models/Product.js';
 import Order from '../models/Order.js';
 import Coupon from '../models/Coupon.js';
 import Category from '../models/Category.js';
+import Brand from '../models/Brand.js';
+import { SKU_PATTERN } from '../models/Product.js';
 import { parseCsv } from '../utils/csvParse.js';
 import { csv, sendCsv } from '../utils/csvOut.js';
 import reportRoutes from './reports.js';
@@ -374,8 +376,10 @@ router.get('/export/orders.csv', requires('orders'), async (req, res, next) => {
 });
 
 // ----- CSV import -----
-// Columns (header row required): name, brand, category, price, stock, description; optional: image.
-// A row whose name + brand already exists updates that product's price, stock, category, description and image.
+// Header row required. Required columns: name, brand, category, price, stock, description.
+// Optional: sku, cost, model, mpn, condition (New / Refurbished), warranty (months), image, and any number of
+// "spec:<label>" columns (for example "spec:Motor KV") which become technical attributes.
+// Rows are matched to an existing product by SKU; a row without a SKU is matched by name + brand, or created with a new SKU.
 const MAX_IMPORT_ROWS = 500;
 
 router.post('/import/products', requires('products'), async (req, res, next) => {
@@ -395,34 +399,70 @@ router.post('/import/products', requires('products'), async (req, res, next) => 
       res.status(400);
       throw new Error(`Import up to ${MAX_IMPORT_ROWS} rows at a time`);
     }
+    // Keep the original header spelling for "spec:" labels.
+    const specCols = head.map((h, i) => [i, h.trim()]).filter(([, h]) => /^spec:/i.test(h) && h.slice(5).trim());
 
     const known = new Set((await Category.find().select('name')).map((c) => c.name));
-    const result = { created: 0, updated: 0, errors: [] };
+    const brands = new Map((await Brand.find().select('name')).map((b) => [b.name.toLowerCase(), b.name]));
+    const result = { created: 0, updated: 0, brandsCreated: 0, errors: [] };
+    const seenSkus = new Map(); // sku -> first line, to catch duplicates inside the file
+
     for (const [n, r] of rows.entries()) {
       const row = Object.fromEntries(cols.map((c, i) => [c, (r[i] ?? '').trim()]));
       const line = n + 2; // header is line 1
       const price = Number(row.price);
       const stock = Number(row.stock);
+      const cost = row.cost === '' || row.cost === undefined ? undefined : Number(row.cost);
+      const warranty = row.warranty === '' || row.warranty === undefined ? 0 : Number(row.warranty);
+      const sku = (row.sku || '').toUpperCase();
+      const condition = row.condition ? row.condition[0].toUpperCase() + row.condition.slice(1).toLowerCase() : 'New';
       const problem =
         !row.name || !row.brand || !row.description ? 'name, brand and description are required'
         : !known.has(row.category) ? `unknown category "${row.category}"`
         : !(price >= 0) || row.price === '' ? 'price must be a number, 0 or more'
         : !Number.isInteger(stock) || stock < 0 || row.stock === '' ? 'stock must be a whole number, 0 or more'
+        : cost !== undefined && !(cost >= 0) ? 'cost must be a number, 0 or more'
+        : !Number.isInteger(warranty) || warranty < 0 || warranty > 120 ? 'warranty must be a whole number of months, 0 to 120'
+        : !['New', 'Refurbished'].includes(condition) ? 'condition must be New or Refurbished'
+        : sku && !SKU_PATTERN.test(sku) ? 'SKU must be 2-40 characters: letters, numbers, . _ -'
+        : sku && seenSkus.has(sku) ? `duplicate SKU ${sku} (also on line ${seenSkus.get(sku)})`
         : row.image && !/^(https?:\/\/|\/)/i.test(row.image) ? 'image must be a URL or a path starting with /'
         : '';
       if (problem) {
         result.errors.push({ line, message: problem });
         continue;
       }
-      const data = { category: row.category, price, countInStock: stock, description: row.description, ...(row.image ? { image: row.image } : {}) };
-      const existing = await Product.findOne({ name: row.name, brand: row.brand });
-      if (existing) {
-        existing.set(data);
-        await existing.save();
-        result.updated++;
-      } else {
-        await Product.create({ name: row.name, brand: row.brand, ...data });
-        result.created++;
+      if (sku) seenSkus.set(sku, line);
+
+      // Brands that do not exist yet are created, so a first import of a new range just works.
+      let brand = brands.get(row.brand.toLowerCase());
+      if (!brand) {
+        brand = (await Brand.create({ name: row.brand })).name;
+        brands.set(brand.toLowerCase(), brand);
+        result.brandsCreated++;
+      }
+      const attributes = specCols.map(([i, h]) => ({ label: h.slice(5).trim(), value: (r[i] ?? '').trim() })).filter((a) => a.value);
+      const data = {
+        brand, category: row.category, price, countInStock: stock, description: row.description,
+        condition, warrantyMonths: warranty,
+        ...(cost !== undefined ? { costPrice: cost } : {}),
+        ...(row.model ? { modelNumber: row.model } : {}),
+        ...(row.mpn ? { mpn: row.mpn } : {}),
+        ...(row.image ? { image: row.image } : {}),
+        ...(attributes.length ? { attributes } : {}),
+      };
+      try {
+        const existing = sku ? await Product.findOne({ sku }) : await Product.findOne({ name: row.name, brand });
+        if (existing) {
+          existing.set({ name: row.name, ...data });
+          await existing.save();
+          result.updated++;
+        } else {
+          await Product.create({ name: row.name, ...(sku ? { sku } : {}), ...data });
+          result.created++;
+        }
+      } catch (err) {
+        result.errors.push({ line, message: err.code === 11000 ? 'that SKU is already used by another product' : err.message });
       }
     }
     res.json(result);
@@ -433,10 +473,10 @@ router.post('/import/products', requires('products'), async (req, res, next) => 
 
 router.get('/export/products.csv', requires('products'), async (req, res, next) => {
   try {
-    const products = await Product.find().select('-reviews').sort({ name: 1 });
+    const products = await Product.find().select('-reviews +costPrice').sort({ name: 1 });
     sendCsv(res, 'products.csv', csv(
-      ['ID', 'Name', 'Brand', 'Category', 'Price', 'Stock', 'Rating', 'Reviews'],
-      products.map((p) => [p._id, p.name, p.brand, p.category, p.price, p.countInStock, p.rating.toFixed(1), p.numReviews])
+      ['SKU', 'Name', 'Brand', 'Category', 'Price', 'Cost', 'Stock', 'Condition', 'Warranty (months)', 'Model', 'MPN', 'Rating', 'Reviews', 'ID'],
+      products.map((p) => [p.sku, p.name, p.brand, p.category, p.price, p.costPrice, p.countInStock, p.condition, p.warrantyMonths, p.modelNumber, p.mpn, p.rating.toFixed(1), p.numReviews, p._id])
     ));
   } catch (err) {
     next(err);

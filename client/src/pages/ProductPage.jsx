@@ -88,7 +88,7 @@ export default function ProductPage() {
           )}
         </div>
         <div>
-          <span className="eyebrow-sm">{p.brand} · {p.category}</span>
+          <span className="eyebrow-sm">{p.brand} · {p.category}{p.condition === 'Refurbished' && ' · Refurbished'}</span>
           <h1>{p.name}</h1>
           <Stars value={p.rating} count={p.numReviews} />
           <span className="price">{money(p.price)}</span>
@@ -98,6 +98,11 @@ export default function ProductPage() {
               {Object.entries(p.specs || {}).filter(([, v]) => v && v !== '-').map(([k, v]) => (
                 <tr key={k}><th>{k.replace(/([A-Z])/g, ' $1')}</th><td>{v}</td></tr>
               ))}
+              {(p.attributes || []).map((a) => <tr key={a.label}><th>{a.label}</th><td>{a.value}</td></tr>)}
+              {p.modelNumber && <tr><th>Model</th><td>{p.modelNumber}</td></tr>}
+              {p.mpn && <tr><th>Part number</th><td>{p.mpn}</td></tr>}
+              {p.warrantyMonths > 0 && <tr><th>Warranty</th><td>{p.warrantyMonths} months</td></tr>}
+              {p.sku && <tr><th>SKU</th><td>{p.sku}</td></tr>}
             </tbody>
           </table>
           {p.countInStock > 0 ? (

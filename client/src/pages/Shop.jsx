@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import useCategories from '../useCategories.js';
+import useBrands from '../useBrands.js';
 import { ProductCard, Loader, ErrorMsg } from '../components/Bits.jsx';
 
 export default function Shop() {
   const categories = ['All', ...useCategories().map((c) => c.name)];
+  const brands = useBrands().filter((b) => b.productCount > 0);
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -38,6 +40,15 @@ export default function Shop() {
             {c}
           </button>
         ))}
+        {brands.length > 1 && (
+          <>
+            <h3>Brand</h3>
+            <select value={params.get('brand') || ''} onChange={(e) => set('brand', e.target.value)} aria-label="Brand">
+              <option value="">All brands</option>
+              {brands.map((b) => <option key={b._id} value={b.name}>{b.name} ({b.productCount})</option>)}
+            </select>
+          </>
+        )}
         <h3>Price</h3>
         <div className="row gap">
           <input type="number" placeholder="Min" defaultValue={params.get('minPrice') || ''}
@@ -56,7 +67,7 @@ export default function Shop() {
 
       <section>
         <div className="page-head">
-          <h1>{params.get('category') || 'All drones'}</h1>
+          <h1>{[params.get('brand'), params.get('category')].filter(Boolean).join(' · ') || 'All drones'}</h1>
           <p className="results">
             {data ? `${data.total} product${data.total === 1 ? '' : 's'}` : ' '}
             {params.get('search') && ` for “${params.get('search')}”`}

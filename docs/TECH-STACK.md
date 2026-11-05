@@ -37,10 +37,10 @@ server/
   server.js          starts the API (loads .env, connects to MongoDB)
   app.js             builds the Express app (also used by the tests)
   seed.js            loads sample data
-  models/            User, Product, Order, Coupon, Category
-  routes/            auth, account, products, categories, orders, admin, reports, upload, seo
+  models/            User, Product, Order, Coupon, Category, Brand
+  routes/            auth, account, products, categories, brands, orders, admin, reports, upload, seo
   middleware/        auth (protect, staff, requires, admin), error handling
-  utils/             pricing, permissions, mailer, csvOut, csvParse
+  utils/             pricing, permissions, mailer, csvOut, csvParse, catalogue
   tests/             api.test.js
 ```
 
@@ -49,8 +49,9 @@ server/
 | Collection | Holds |
 |---|---|
 | `users` | name, email, password hash, role and admin flag, suspended flag, last sign-in, saved addresses, wishlist, saved cart, reset-token hash |
-| `products` | name, brand, category, description, image and gallery, price, stock, specs, embedded reviews, rating |
+| `products` | name, unique SKU, brand, category, description, image and gallery, price, purchase cost (staff only), stock, condition, warranty, model and part number, specs and free-form attributes, embedded reviews, rating |
 | `categories` | name (unique) |
+| `brands` | name (unique), logo, description |
 | `orders` | user, item snapshot (name, image, price, quantity), shipping address, payment method, coupon, totals, tracking, status, return request, refund flag |
 | `coupons` | code, type (percent or fixed), value, minimum order, expiry, usage limit and count, active flag |
 
@@ -62,6 +63,7 @@ server/
 | `/api/account` | profile, password, address book, wishlist, saved cart |
 | `/api/products` | list and search, detail, related, by-ids, reviews, admin create, update, delete |
 | `/api/categories` | public list; admin add, rename, delete |
+| `/api/brands` | public list; admin add, edit, rename, delete |
 | `/api/orders` | price quote, create, my orders, detail, cancel, return request; staff list, status, tracking, return decision |
 | `/api/admin` | stats, users and roles, coupons, CSV import and export |
 | `/api/admin/reports` | sales, products, categories, customers, inventory, coupons, returns (JSON or CSV) |
@@ -73,6 +75,8 @@ server/
 - **Server-side pricing.** `utils/pricing.js` is the only place totals are calculated. The quote and order routes both use it, and client-sent prices are ignored.
 - **Atomic stock and coupon claims.** Stock is decremented with a conditional update and rolled back if a later step fails; the same pattern protects coupon usage limits.
 - **Role permissions.** `utils/permissions.js` maps roles to permissions. Routes use `requires('<permission>')` from `middleware/auth.js`. The older `isAdmin` flag stays authoritative for admins.
+- **Purchase cost is staff-only.** `costPrice` is excluded from every query by default (`select: false`) and only the staff edit form, the product CSV export and the inventory report ask for it.
+- **SKU.** Unique and upper-cased; the model generates one (brand prefix + random hex) when a product is created without it. `utils/catalogue.js` gives older data brands and SKUs at server start.
 - **Reports.** One route builds each report as columns, rows and a summary with MongoDB aggregations; the same data feeds the screen and the CSV.
 - **Testability.** `app.js` exports the app without listening, so tests call it over HTTP with a throwaway port; rate limiting is switched off when `NODE_ENV=test`.
 
@@ -112,7 +116,7 @@ client/src/
 
 - **Package manager:** npm, with a root `package.json` for shortcuts (`install:all`, `seed`, `server`, `client`).
 - **Module system:** ES modules on both sides.
-- **Tests:** `npm test --prefix server` runs 49 integration tests against `droneshop_test`. The tests refuse to run on a database whose name does not end in `_test`.
+- **Tests:** `npm test --prefix server` runs 59 integration tests against `droneshop_test`. The tests refuse to run on a database whose name does not end in `_test`.
 - **Version control:** Git; commits carry the project owner's identity only.
 - **Assets:** product photos from Wikimedia Commons in `client/public/images/drones/`, credits in `CREDITS.md`; the design system reference is `assets/DESIGN-dji.md`.
 

@@ -23,6 +23,7 @@ export default function Products() {
   const categories = useCategories().map((c) => c.name);
   const category = params.get('category') || '';
   const stock = params.get('stock') || '';
+  const brand = params.get('brand') || '';
 
   const load = () => loadAll().then(setList).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -35,9 +36,10 @@ export default function Products() {
 
   const rows = useMemo(() => (list || []).filter((p) =>
     (!category || p.category === category) &&
+    (!brand || p.brand === brand) &&
     (!stock || (stock === 'low' ? p.countInStock <= 5 : stock === 'out' ? p.countInStock === 0 : true)) &&
-    (!q || `${p.name} ${p.brand}`.toLowerCase().includes(q.toLowerCase()))
-  ), [list, q, category, stock]);
+    (!q || `${p.name} ${p.brand} ${p.sku || ''}`.toLowerCase().includes(q.toLowerCase()))
+  ), [list, q, category, brand, stock]);
 
   const updateStock = async (p, value) => {
     const n = Math.max(0, Math.floor(Number(value)));
@@ -83,7 +85,7 @@ export default function Products() {
       </div>
 
       <div className="toolbar">
-        <input placeholder="Search name or brand" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder="Search name, brand or SKU" value={q} onChange={(e) => setQ(e.target.value)} />
         <select value={category} onChange={(e) => setParam('category', e.target.value)}>
           <option value="">All categories</option>
           {categories.map((c) => <option key={c}>{c}</option>)}
@@ -104,12 +106,12 @@ export default function Products() {
           )}
         </div>
       )}
-      <p className="muted">CSV import columns: name, brand, category, price, stock, description, image (optional). Rows matching an existing name and brand update that product.</p>
+      <p className="muted">CSV import columns: name, brand, category, price, stock, description. Optional: sku, cost, model, mpn, condition, warranty (months), image, and spec: columns such as "spec:Motor KV". Rows are matched by SKU (or by name and brand when there is no SKU) and update that product; new brands are created.</p>
       {!list && !error ? <Loader /> : (
         <table className="table">
-          <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th /></tr></thead>
+          <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th /></tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan="5" className="muted">No products match.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan="6" className="muted">No products match.</td></tr>}
             {rows.map((p) => (
               <tr key={p._id}>
                 <td>
@@ -118,6 +120,7 @@ export default function Products() {
                     <div><strong>{p.name}</strong><br /><small className="muted">{p.brand}</small></div>
                   </div>
                 </td>
+                <td><small>{p.sku || '—'}</small></td>
                 <td>{p.category}</td>
                 <td>{money(p.price)}</td>
                 <td>

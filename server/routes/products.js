@@ -1,27 +1,56 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import Product from '../models/Product.js';
+import Product, { SKU_PATTERN } from '../models/Product.js';
 import Category from '../models/Category.js';
+import Brand from '../models/Brand.js';
 import { protect, requires } from '../middleware/auth.js';
 
 const router = Router();
 
 // Fields the server manages itself; admins cannot set them through the product form.
-const clean = ({ reviews, rating, numReviews, _id, __v, createdAt, updatedAt, ...data }) => {
+const clean = ({ reviews, rating, numReviews, _id, __v, createdAt, updatedAt, ...data }, res) => {
   if (Array.isArray(data.images)) data.images = data.images.filter((u) => typeof u === 'string' && u.trim()).slice(0, 8);
+
+  // SKU: normalised to upper case; blank means "generate one" on create and "keep the current one" on update.
+  if (data.sku === undefined || data.sku === null || String(data.sku).trim() === '') delete data.sku;
+  else {
+    data.sku = String(data.sku).trim().toUpperCase();
+    if (!SKU_PATTERN.test(data.sku)) throw bad(res, 'SKU must be 2-40 characters: letters, numbers, . _ -');
+  }
+  // Purchase cost is optional; an empty form field means "not set".
+  if (data.costPrice === '' || data.costPrice === null) data.costPrice = undefined;
+  if (data.costPrice !== undefined && !(Number(data.costPrice) >= 0)) throw bad(res, 'Purchase cost must be a number, 0 or more');
+  for (const k of ['modelNumber', 'mpn']) if (data[k] === '') data[k] = undefined;
+  if (data.warrantyMonths === '' || data.warrantyMonths === null) data.warrantyMonths = 0;
+  if (data.attributes !== undefined) {
+    if (!Array.isArray(data.attributes)) throw bad(res, 'Attributes must be a list');
+    data.attributes = data.attributes
+      .filter((a) => a && typeof a.label === 'string' && typeof a.value === 'string' && a.label.trim() && a.value.trim())
+      .map((a) => ({ label: a.label.trim().slice(0, 60), value: a.value.trim().slice(0, 200) }))
+      .slice(0, 30);
+  }
   return data;
+};
+
+const bad = (res, message) => {
+  res.status(400);
+  return new Error(message);
 };
 
 // GET /api/products?search=&category=&minPrice=&maxPrice=&sort=&page=&limit=
 router.get('/', async (req, res, next) => {
   try {
-    const { search, category, minPrice, maxPrice, sort } = req.query;
+    const { search, category, brand, minPrice, maxPrice, sort } = req.query;
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(parseInt(req.query.limit) || 12, 50);
 
     const filter = {};
-    if (search) filter.$text = { $search: search };
+    // An exact SKU also matches, so staff and shoppers can paste a part number.
+    if (typeof search === 'string' && search.trim()) {
+      filter.$or = [{ $text: { $search: search } }, { sku: search.trim().toUpperCase() }];
+    }
     if (category && category !== 'All') filter.category = category;
+    if (typeof brand === 'string' && brand) filter.brand = brand;
     if (minPrice || maxPrice) {
       filter.price = {};
       if (minPrice) filter.price.$gte = Number(minPrice);
@@ -83,6 +112,20 @@ router.get('/:id/related', async (req, res, next) => {
   }
 });
 
+// The edit form's copy of a product: the same as the public one plus the purchase cost.
+router.get('/:id/admin', protect, requires('products'), async (req, res, next) => {
+  try {
+    const product = mongoose.isValidObjectId(req.params.id) ? await Product.findById(req.params.id).select('+costPrice') : null;
+    if (!product) {
+      res.status(404);
+      throw new Error('Product not found');
+    }
+    res.json(product);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -104,20 +147,33 @@ async function checkCategory(data, res) {
   }
 }
 
+// The brand must exist; its stored spelling is used, so "dji" and "DJI" cannot become two brands.
+async function checkBrand(data, res) {
+  if (data.brand === undefined) return;
+  const name = String(data.brand).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const brand = name && (await Brand.findOne({ name: new RegExp(`^${name}$`, 'i') }));
+  if (!brand) throw bad(res, 'Unknown brand. Add it under Brands first.');
+  data.brand = brand.name;
+}
+
+const skuTaken = (err, res) => (err.code === 11000 && err.keyPattern?.sku ? bad(res, 'That SKU is already used by another product') : err);
+
 router.post('/', protect, requires('products'), async (req, res, next) => {
   try {
-    const data = clean(req.body);
+    const data = clean(req.body, res);
     await checkCategory(data, res);
+    await checkBrand(data, res);
     res.status(201).json(await Product.create(data));
   } catch (err) {
-    next(err);
+    next(skuTaken(err, res));
   }
 });
 
 router.put('/:id', protect, requires('products'), async (req, res, next) => {
   try {
-    const data = clean(req.body);
+    const data = clean(req.body, res);
     await checkCategory(data, res);
+    await checkBrand(data, res);
     const product = await Product.findByIdAndUpdate(req.params.id, data, {
       new: true,
       runValidators: true,
@@ -128,7 +184,7 @@ router.put('/:id', protect, requires('products'), async (req, res, next) => {
     }
     res.json(product);
   } catch (err) {
-    next(err);
+    next(skuTaken(err, res));
   }
 });
 

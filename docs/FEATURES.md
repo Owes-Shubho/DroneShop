@@ -40,8 +40,9 @@ What the shop does today. For the wider e-commerce checklist, including what is 
 |---|---|---|
 | Overview | Revenue, orders, products and customers, last 7 days sales chart, orders by status, low-stock list, best sellers, recent orders | `dashboard` |
 | Reports | Seven reports with date ranges, charts, CSV export and print (below) | `reports` |
-| Products | Add, edit, delete; upload a main photo and up to 8 gallery photos; edit stock in place; filter by category or stock; export CSV; import CSV | `products` |
+| Products | Add, edit, delete; SKU (generated if blank, unique); purchase cost and live margin; brand from the brand list; model number, part number, condition (New / Refurbished), warranty; technical attributes; main photo and up to 8 gallery photos; edit stock in place; filter by category, brand or stock; export CSV; import CSV matched by SKU | `products` |
 | Categories | Add, rename (products move with it), delete empty categories | `products` |
+| Brands | Add, edit (name, logo, description), rename (products move with it), delete unused brands; the shop can filter by brand | `products` |
 | Orders | Filter by status, change status, add carrier and tracking number (marks the order shipped), handle return requests (approve, reject, refund), export CSV | `orders` |
 | Coupons | Create, edit, switch on or off, delete | `coupons` |
 | Users | Search, filter by role and status, add users, edit profile, suspend or reinstate, send a password-reset link, delete; detail page with order totals, addresses and recent orders | `users.view`, `users.manage` |
@@ -95,4 +96,4 @@ Coupons: `WELCOME10` (10% off), `SAVE50` ($50 off orders over $500). Change thes
 
 ## Not built
 
-Online payment, real email service setup, guest checkout, product variants, shipping zones and regional tax, brand management, email verification, two-factor sign-in, editable roles, audit log, multi-currency and language, cloud image storage, database backups, and browser-level UI tests.
+Online payment, real email service setup, guest checkout, product variants, shipping zones and regional tax, email verification, two-factor sign-in, editable roles, audit log, multi-currency and language, cloud image storage, database backups, and browser-level UI tests.

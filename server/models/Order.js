@@ -7,6 +7,7 @@ const orderSchema = new mongoose.Schema(
       {
         product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
         name: { type: String, required: true },
+        sku: String, // snapshot, so old orders keep the SKU they were sold under
         image: String,
         price: { type: Number, required: true },
         qty: { type: Number, required: true, min: 1 },

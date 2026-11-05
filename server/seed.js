@@ -5,6 +5,7 @@ import Product from './models/Product.js';
 import Order from './models/Order.js';
 import Coupon from './models/Coupon.js';
 import Category from './models/Category.js';
+import Brand from './models/Brand.js';
 
 const img = (f) => `/images/drones/${f}.jpg`;
 
@@ -65,8 +66,17 @@ const products = [
     specs: { flightTime: '-', range: '-', camera: '-', weight: '780 g' } },
 ];
 
+// SKU (brand prefix + number), purchase cost (70% of price in this sample data) and warranty for every product.
+products.forEach((p, i) => {
+  p.sku = `${p.brand.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase()}-${String(i + 1).padStart(3, '0')}`;
+  p.costPrice = Math.round(p.price * 0.7 * 100) / 100;
+  p.warrantyMonths = p.category === 'Accessories' ? 6 : 12;
+  p.condition = 'New';
+});
+
 await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/droneshop');
-await Promise.all([Order.deleteMany(), Product.deleteMany(), User.deleteMany(), Coupon.deleteMany(), Category.deleteMany()]);
+await Promise.all([Order.deleteMany(), Product.deleteMany(), User.deleteMany(), Coupon.deleteMany(), Category.deleteMany(), Brand.deleteMany()]);
+await Brand.insertMany([...new Set(products.map((p) => p.brand))].map((name) => ({ name })));
 await Category.insertMany([...new Set(products.map((p) => p.category))].map((name) => ({ name })));
 
 await User.create([

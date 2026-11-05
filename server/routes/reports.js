@@ -108,14 +108,14 @@ const lines = (rng) => [
 async function products(rng) {
   const data = await Order.aggregate([
     ...lines(rng),
-    { $group: { _id: '$items.product', name: { $first: '$items.name' }, units: { $sum: '$items.qty' }, revenue: { $sum: { $multiply: ['$items.price', '$items.qty'] } }, orders: { $sum: 1 } } },
+    { $group: { _id: '$items.product', name: { $first: '$items.name' }, sku: { $first: '$items.sku' }, units: { $sum: '$items.qty' }, revenue: { $sum: { $multiply: ['$items.price', '$items.qty'] } }, orders: { $sum: 1 } } },
     { $sort: { revenue: -1 } },
     { $limit: 200 },
   ]);
-  const rows = data.map((r) => ({ name: r.name, units: r.units, orders: r.orders, revenue: r2(r.revenue), avg: r.units ? r2(r.revenue / r.units) : 0 }));
+  const rows = data.map((r) => ({ sku: r.sku || '', name: r.name, units: r.units, orders: r.orders, revenue: r2(r.revenue), avg: r.units ? r2(r.revenue / r.units) : 0 }));
   return {
     title: 'Products',
-    columns: [col('name', 'Product'), col('units', 'Units sold', 'int'), col('orders', 'Orders', 'int'), col('revenue', 'Revenue', 'money'), col('avg', 'Average price', 'money')],
+    columns: [col('sku', 'SKU'), col('name', 'Product'), col('units', 'Units sold', 'int'), col('orders', 'Orders', 'int'), col('revenue', 'Revenue', 'money'), col('avg', 'Average price', 'money')],
     rows,
     summary: [['Products sold', rows.length, 'int'], ['Units sold', rows.reduce((s, r) => s + r.units, 0), 'int'], ['Revenue', r2(rows.reduce((s, r) => s + r.revenue, 0)), 'money']],
     chart: { key: 'revenue', label: 'Revenue', labelKey: 'name', top: 10 },
@@ -164,19 +164,21 @@ async function customers(rng) {
 
 // A snapshot of today's stock; the date range does not apply.
 async function inventory() {
-  const list = await Product.find().select('name brand category price countInStock').sort({ countInStock: 1, name: 1 }).lean();
+  const list = await Product.find().select('sku name brand category price countInStock +costPrice').sort({ countInStock: 1, name: 1 }).lean();
   const rows = list.map((p) => ({
-    name: p.name, brand: p.brand, category: p.category, price: r2(p.price), stock: p.countInStock, value: r2(p.price * p.countInStock),
+    sku: p.sku || '', name: p.name, brand: p.brand, category: p.category, price: r2(p.price), cost: p.costPrice === undefined ? null : r2(p.costPrice),
+    margin: p.costPrice === undefined || !p.price ? null : r2(((p.price - p.costPrice) / p.price) * 100),
+    stock: p.countInStock, value: r2(p.price * p.countInStock), costValue: p.costPrice === undefined ? null : r2(p.costPrice * p.countInStock),
     status: p.countInStock === 0 ? 'Out of stock' : p.countInStock <= LOW_STOCK ? 'Low' : 'OK',
   }));
   return {
     title: 'Inventory',
     snapshot: true,
-    columns: [col('name', 'Product'), col('brand', 'Brand'), col('category', 'Category'), col('price', 'Price', 'money'), col('stock', 'In stock', 'int'), col('value', 'Stock value', 'money'), col('status', 'Status')],
+    columns: [col('sku', 'SKU'), col('name', 'Product'), col('brand', 'Brand'), col('category', 'Category'), col('price', 'Price', 'money'), col('cost', 'Cost', 'money'), col('margin', 'Margin', 'percent'), col('stock', 'In stock', 'int'), col('value', 'Stock value (retail)', 'money'), col('costValue', 'Stock value (cost)', 'money'), col('status', 'Status')],
     rows,
     summary: [
       ['Products', rows.length, 'int'], ['Units in stock', rows.reduce((s, r) => s + r.stock, 0), 'int'], ['Stock value', r2(rows.reduce((s, r) => s + r.value, 0)), 'money'],
-      ['Low stock', rows.filter((r) => r.status === 'Low').length, 'int'], ['Out of stock', rows.filter((r) => r.status === 'Out of stock').length, 'int'],
+      ['Stock value at cost', r2(rows.reduce((s, r) => s + (r.costValue || 0), 0)), 'money'], ['Low stock', rows.filter((r) => r.status === 'Low').length, 'int'], ['Out of stock', rows.filter((r) => r.status === 'Out of stock').length, 'int'],
     ],
   };
 }
@@ -234,7 +236,7 @@ router.get('/:type', async (req, res, next) => {
     const out = { type: req.params.type, ...report, from: ymd(rng.from), to: ymd(rng.to), group, generatedAt: new Date().toISOString() };
 
     if (req.query.format === 'csv') {
-      const fmt = (c, v) => (c.type === 'money' || c.type === 'percent' ? r2(v) : v);
+      const fmt = (c, v) => (v === null || v === undefined ? '' : c.type === 'money' || c.type === 'percent' ? r2(v) : v);
       const body = csv(
         out.columns.map((c) => c.label),
         out.rows.map((row) => out.columns.map((c) => fmt(c, row[c.key])))

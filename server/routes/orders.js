@@ -30,7 +30,7 @@ async function buildItems(items, res) {
     const qty = Number(i.qty);
     if (!p || !Number.isInteger(qty) || qty < 1) throw fail(res, 400, 'Invalid item in order');
     if (p.countInStock < qty) throw fail(res, 400, `Not enough stock for ${p.name}`);
-    return { product: p._id, name: p.name, image: p.image, price: p.price, qty };
+    return { product: p._id, name: p.name, sku: p.sku, image: p.image, price: p.price, qty };
   });
 }
 

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import app from './app.js';
+import { backfillCatalogue } from './utils/catalogue.js';
 
 if (!process.env.JWT_SECRET) {
   console.error('JWT_SECRET is not set. Copy .env.example to .env and set it.');
@@ -13,6 +14,11 @@ mongoose
   .connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/droneshop')
   .then(() => {
     console.log('MongoDB connected');
+    return backfillCatalogue().then((r) => {
+      if (r.brands || r.skus) console.log(`Catalogue updated: ${r.brands} brands, ${r.skus} SKUs added`);
+    });
+  })
+  .then(() => {
     app.listen(PORT, () => console.log(`API running on http://localhost:${PORT}`));
   })
   .catch((err) => {

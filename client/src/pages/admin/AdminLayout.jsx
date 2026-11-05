@@ -8,6 +8,7 @@ export const links = [
   ['/admin/reports', 'Reports', 'reports'],
   ['/admin/products', 'Products', 'products'],
   ['/admin/categories', 'Categories', 'products'],
+  ['/admin/brands', 'Brands', 'products'],
   ['/admin/orders', 'Orders', 'orders'],
   ['/admin/coupons', 'Coupons', 'coupons'],
   ['/admin/users', 'Users', 'users.view'],

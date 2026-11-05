@@ -24,6 +24,7 @@ import Categories from './pages/admin/Categories.jsx';
 import UserDetail from './pages/admin/UserDetail.jsx';
 import Roles from './pages/admin/Roles.jsx';
 import Reports from './pages/admin/Reports.jsx';
+import Brands from './pages/admin/Brands.jsx';
 import Compare from './pages/Compare.jsx';
 import CompareBar from './components/CompareBar.jsx';
 
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="products/new" element={<Protected permission="products"><ProductForm /></Protected>} />
             <Route path="products/:id" element={<Protected permission="products"><ProductForm /></Protected>} />
             <Route path="categories" element={<Protected permission="products"><Categories /></Protected>} />
+            <Route path="brands" element={<Protected permission="products"><Brands /></Protected>} />
             <Route path="reports" element={<Protected permission="reports"><Reports /></Protected>} />
             <Route path="orders" element={<Protected permission="orders"><AdminOrders /></Protected>} />
             <Route path="coupons" element={<Protected permission="coupons"><Coupons /></Protected>} />
