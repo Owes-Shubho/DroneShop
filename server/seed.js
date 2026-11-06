@@ -6,6 +6,8 @@ import Order from './models/Order.js';
 import Coupon from './models/Coupon.js';
 import Category from './models/Category.js';
 import Brand from './models/Brand.js';
+import Supplier from './models/Supplier.js';
+import StockMovement from './models/StockMovement.js';
 
 const img = (f) => `/images/drones/${f}.jpg`;
 
@@ -75,7 +77,7 @@ products.forEach((p, i) => {
 });
 
 await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/droneshop');
-await Promise.all([Order.deleteMany(), Product.deleteMany(), User.deleteMany(), Coupon.deleteMany(), Category.deleteMany(), Brand.deleteMany()]);
+await Promise.all([Order.deleteMany(), Product.deleteMany(), User.deleteMany(), Coupon.deleteMany(), Category.deleteMany(), Brand.deleteMany(), Supplier.deleteMany(), StockMovement.deleteMany()]);
 await Brand.insertMany([...new Set(products.map((p) => p.brand))].map((name) => ({ name })));
 await Category.insertMany([...new Set(products.map((p) => p.category))].map((name) => ({ name })));
 
@@ -83,7 +85,13 @@ await User.create([
   { name: 'Admin', email: 'admin@droneshop.com', password: 'admin123', isAdmin: true },
   { name: 'Demo Customer', email: 'user@droneshop.com', password: 'user123' },
 ]);
-await Product.insertMany(products);
+const created = await Product.insertMany(products);
+// Opening stock goes in the stock log, so every later change has something to follow.
+await StockMovement.insertMany(created.map((p) => ({ product: p._id, sku: p.sku, name: p.name, change: p.countInStock, after: p.countInStock, reason: 'initial', note: 'Sample data', userName: 'Seed' })).filter((m) => m.change > 0));
+await Supplier.create([
+  { name: 'SkyParts Wholesale', contactName: 'Sample Contact', email: 'orders@skyparts.example', phone: '+1 555 0100', notes: 'Sample supplier' },
+  { name: 'Aero Supply Co', contactName: 'Sample Contact', email: 'sales@aerosupply.example', phone: '+1 555 0101', notes: 'Sample supplier' },
+]);
 await Coupon.create([
   { code: 'WELCOME10', type: 'percent', value: 10 },
   { code: 'SAVE50', type: 'fixed', value: 50, minSubtotal: 500 },

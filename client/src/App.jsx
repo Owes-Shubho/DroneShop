@@ -25,6 +25,8 @@ import UserDetail from './pages/admin/UserDetail.jsx';
 import Roles from './pages/admin/Roles.jsx';
 import Reports from './pages/admin/Reports.jsx';
 import Brands from './pages/admin/Brands.jsx';
+import Inventory from './pages/admin/Inventory.jsx';
+import PackingSlip from './pages/PackingSlip.jsx';
 import Compare from './pages/Compare.jsx';
 import CompareBar from './components/CompareBar.jsx';
 
@@ -50,6 +52,7 @@ export default function App() {
           <Route path="/account" element={<Protected><Account /></Protected>} />
           <Route path="/wishlist" element={<Protected><Wishlist /></Protected>} />
           <Route path="/orders/:id/invoice" element={<Protected><Invoice /></Protected>} />
+          <Route path="/orders/:id/packing-slip" element={<Protected adminOnly permission="orders"><PackingSlip /></Protected>} />
           <Route path="/checkout" element={<Protected><Checkout /></Protected>} />
           <Route path="/orders" element={<Protected><MyOrders /></Protected>} />
           <Route path="/orders/:id" element={<Protected><OrderDetail /></Protected>} />
@@ -60,6 +63,7 @@ export default function App() {
             <Route path="products/:id" element={<Protected permission="products"><ProductForm /></Protected>} />
             <Route path="categories" element={<Protected permission="products"><Categories /></Protected>} />
             <Route path="brands" element={<Protected permission="products"><Brands /></Protected>} />
+            <Route path="inventory" element={<Protected permission="inventory"><Inventory /></Protected>} />
             <Route path="reports" element={<Protected permission="reports"><Reports /></Protected>} />
             <Route path="orders" element={<Protected permission="orders"><AdminOrders /></Protected>} />
             <Route path="coupons" element={<Protected permission="coupons"><Coupons /></Protected>} />

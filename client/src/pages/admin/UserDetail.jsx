@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, money } from '../../api.js';
+import { api, money, statusClass } from '../../api.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { Loader, ErrorMsg } from '../../components/Bits.jsx';
 import { RoleBadge, ROLE_LABELS } from './Users.jsx';
@@ -104,7 +104,7 @@ export default function UserDetail() {
                 <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                 <td>{o.items.reduce((s, i) => s + i.qty, 0)}</td>
                 <td>{money(o.totalPrice)}</td>
-                <td><span className={`badge ${o.status}`}>{o.status}</span>{o.isRefunded && ' refunded'}</td>
+                <td><span className={`badge ${statusClass(o.status)}`}>{o.status}</span>{o.isRefunded && ' refunded'}</td>
               </tr>
             ))}
           </tbody>

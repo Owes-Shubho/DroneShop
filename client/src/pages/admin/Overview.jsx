@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, money } from '../../api.js';
+import { api, money, statusClass } from '../../api.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { Loader, ErrorMsg } from '../../components/Bits.jsx';
 
@@ -55,9 +55,9 @@ export default function Overview() {
 
         <div className="panel">
           <h3>Orders by status</h3>
-          {['Processing', 'Shipped', 'Delivered', 'Cancelled'].map((st) => (
+          {['Processing', 'Confirmed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'].map((st) => (
             <div key={st} className="row between status-row">
-              <span className={`badge ${st}`}>{st}</span><strong>{s.byStatus[st] || 0}</strong>
+              <span className={`badge ${statusClass(st)}`}>{st}</span><strong>{s.byStatus[st] || 0}</strong>
             </div>
           ))}
         </div>
@@ -97,7 +97,7 @@ export default function Overview() {
                   <td>{o.user?.name || 'Deleted user'}</td>
                   <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                   <td>{money(o.totalPrice)}</td>
-                  <td><span className={`badge ${o.status}`}>{o.status}</span></td>
+                  <td><span className={`badge ${statusClass(o.status)}`}>{o.status}</span></td>
                 </tr>
               ))}
             </tbody>

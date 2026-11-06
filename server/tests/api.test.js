@@ -14,6 +14,7 @@ const { default: Coupon } = await import('../models/Coupon.js');
 const { default: Order } = await import('../models/Order.js');
 const { default: Category } = await import('../models/Category.js');
 const { default: Brand } = await import('../models/Brand.js');
+const { default: StockMovement } = await import('../models/StockMovement.js');
 const { totals, couponProblem } = await import('../utils/pricing.js');
 
 const MONGO = process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/droneshop_test';
@@ -871,6 +872,258 @@ describe('catalogue: brands, SKU, cost, drone fields', () => {
     assert.ok(csv.includes('COST-1'));
     const prod = await api('/api/admin/reports/products', { token: adminToken });
     assert.ok(prod.body.columns.some((c) => c.key === 'sku'));
+  });
+});
+
+
+describe('inventory: stock log, adjustments, suppliers', () => {
+  let managerToken, supportToken, item, supplierId;
+  const inv = (path, opts = {}) => api(`/api/admin/inventory${path}`, { token: adminToken, ...opts });
+  const adjust = (body, token = adminToken) => api('/api/admin/inventory/adjust', { method: 'POST', token, body });
+  const stockOf = async () => (await Product.findById(item._id)).countInStock;
+
+  before(async () => {
+    const login = async (email, password) => (await api('/api/auth/login', { method: 'POST', body: { email, password } })).body.token;
+    await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Ivy Inventory', email: 'ivy@test.com', password: 'ivy12345', role: 'manager' } });
+    await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Sal Support', email: 'sal@test.com', password: 'sal12345', role: 'support' } });
+    managerToken = await login('ivy@test.com', 'ivy12345');
+    supportToken = await login('sal@test.com', 'sal12345');
+    item = await Product.create({ name: 'Ledger Drone', brand: 'T', category: 'Toy Drones', description: 'd', price: 50, countInStock: 10 });
+  });
+
+  test('only roles with the inventory permission can reach it', async () => {
+    for (const path of ['/stock', '/movements', '/suppliers']) {
+      assert.equal((await inv(path, { token: aliceToken })).status, 403, path);
+      assert.equal((await inv(path, { token: supportToken })).status, 403, `${path} for support`);
+      assert.equal((await inv(path, { token: managerToken })).status, 200, `${path} for manager`);
+    }
+    assert.equal((await adjust({ product: String(item._id), reason: 'purchase', change: 1 }, supportToken)).status, 403);
+    assert.equal((await api('/api/admin/inventory/stock')).status, 401);
+  });
+
+  test('orders write to the log: sale, then cancellation; a failed order writes nothing', async () => {
+    const countLog = () => StockMovement.countDocuments({ product: item._id });
+    const start = await countLog();
+    const o = await order(aliceToken, [{ product: String(item._id), qty: 3 }]);
+    assert.equal(o.status, 201);
+    const sale = await StockMovement.findOne({ product: item._id, reason: 'sale' });
+    assert.equal(sale.change, -3);
+    assert.equal(sale.after, 7);
+    assert.equal(String(sale.order), o.body._id);
+    assert.equal(sale.sku, (await Product.findById(item._id)).sku);
+    assert.equal(sale.userName, (await User.findOne({ email: 'alice@test.com' })).name);
+
+    const mid = await countLog();
+    assert.equal((await order(aliceToken, [{ product: String(item._id), qty: 99 }])).status, 400);
+    assert.equal(await countLog(), mid, 'rejected order is not logged');
+    assert.equal(await stockOf(), 7);
+
+    await api(`/api/orders/${o.body._id}/cancel`, { method: 'PUT', token: aliceToken });
+    const back = await StockMovement.findOne({ product: item._id, reason: 'cancellation' });
+    assert.deepEqual([back.change, back.after], [3, 10]);
+    assert.equal(await countLog(), start + 2);
+  });
+
+  test('refunds write to the log and restock', async () => {
+    const o = await order(aliceToken, [{ product: String(item._id), qty: 2 }]);
+    await api(`/api/orders/${o.body._id}/status`, { method: 'PUT', token: adminToken, body: { status: 'Delivered' } });
+    await api(`/api/orders/${o.body._id}/return`, { method: 'POST', token: aliceToken, body: { reason: 'Not needed' } });
+    await api(`/api/orders/${o.body._id}/return`, { method: 'PUT', token: adminToken, body: { decision: 'refund' } });
+    const m = await StockMovement.findOne({ product: item._id, reason: 'refund' });
+    assert.deepEqual([m.change, m.after], [2, 10]);
+    assert.equal(m.userName, 'Admin');
+  });
+
+  test('adjust: validation and guard rails leave stock untouched', async () => {
+    const p = String(item._id);
+    const before = await stockOf();
+    const bad = async (body, token) => assert.equal((await adjust(body, token)).status, 400, JSON.stringify(body));
+    await bad({ product: 'nope', reason: 'purchase', change: 1 });
+    await bad({ product: p, reason: 'free-for-all', change: 1 });
+    await bad({ product: p, reason: 'purchase', change: 0 });
+    await bad({ product: p, reason: 'purchase', change: 1.5 });
+    await bad({ product: p, reason: 'purchase', change: -2 });
+    await bad({ product: p, reason: 'damaged', change: 2, note: 'wet' });
+    await bad({ product: p, reason: 'damaged', change: -1 });
+    await bad({ product: p, reason: 'correction', change: -1, note: '' });
+    await bad({ product: p, reason: 'supplier-return', change: 3 });
+    await bad({ product: p, reason: 'damaged', change: -9999, note: 'too many' });
+    await bad({ product: p, reason: 'purchase', change: 1, unitCost: -4 });
+    await bad({ product: p, reason: 'purchase', change: 1, supplier: String(new mongoose.Types.ObjectId()) });
+    assert.equal((await adjust({ product: String(new mongoose.Types.ObjectId()), reason: 'purchase', change: 1 })).status, 404);
+    assert.equal(await stockOf(), before);
+  });
+
+  test('adjust: purchase from a supplier, damage, supplier return, correction', async () => {
+    const p = String(item._id);
+    const s = await inv('/suppliers', { method: 'POST', body: { name: 'Aero Parts Ltd', contactName: 'Ann', email: 'ann@aero.test', phone: '123' } });
+    assert.equal(s.status, 201);
+    supplierId = s.body._id;
+    const buy = await adjust({ product: p, reason: 'purchase', change: 20, supplier: supplierId, unitCost: 31.5, note: 'PO 77' });
+    assert.equal(buy.status, 200);
+    assert.deepEqual([buy.body.change, buy.body.after], [20, 30]);
+    const row = await StockMovement.findOne({ product: item._id, reason: 'purchase' });
+    assert.equal(String(row.supplier), supplierId);
+    assert.equal(row.unitCost, 31.5);
+    assert.equal(row.note, 'PO 77');
+    assert.equal((await adjust({ product: p, reason: 'damaged', change: -4, note: 'Crushed in transit' })).body.after, 26);
+    assert.equal((await adjust({ product: p, reason: 'supplier-return', change: -6, supplier: supplierId })).body.after, 20);
+    assert.equal((await adjust({ product: p, reason: 'correction', change: 5, note: 'Stock count found 5 extra' })).body.after, 25);
+    assert.equal(await stockOf(), 25);
+    // damaged/return cannot take stock below zero
+    assert.equal((await adjust({ product: p, reason: 'damaged', change: -26, note: 'too many' })).status, 400);
+    assert.equal(await stockOf(), 25);
+  });
+
+  test('every change in the log adds up to the product\'s stock', async () => {
+    const rows = await StockMovement.find({ product: item._id }).sort({ createdAt: 1, _id: 1 });
+    assert.equal(rows.at(-1).after, await stockOf());
+    // each row\'s "after" follows from the one before it
+    for (let i = 1; i < rows.length; i++) assert.equal(rows[i].after, rows[i - 1].after + rows[i].change, `row ${i}`);
+  });
+
+  test('product form logs initial stock and later edits', async () => {
+    const created = await api('/api/products', { method: 'POST', token: adminToken, body: { name: 'Log Probe', brand: 'T', category: 'Toy Drones', description: 'd', price: 5, countInStock: 8 } });
+    const id = created.body._id;
+    const initial = await StockMovement.findOne({ product: id, reason: 'initial' });
+    assert.deepEqual([initial.change, initial.after], [8, 8]);
+    await api(`/api/products/${id}`, { method: 'PUT', token: adminToken, body: { countInStock: 5 } });
+    await api(`/api/products/${id}`, { method: 'PUT', token: adminToken, body: { price: 6 } }); // no stock change: no row
+    await api(`/api/products/${id}`, { method: 'PUT', token: adminToken, body: { countInStock: 5 } }); // same value: no row
+    const rows = await StockMovement.find({ product: id }).sort({ _id: 1 });
+    assert.deepEqual(rows.map((r) => [r.reason, r.change, r.after]), [['initial', 8, 8], ['correction', -3, 5]]);
+    const zero = await api('/api/products', { method: 'POST', token: adminToken, body: { name: 'Zero Start', brand: 'T', category: 'Toy Drones', description: 'd', price: 5, countInStock: 0 } });
+    assert.equal(await StockMovement.countDocuments({ product: zero.body._id }), 0, 'no row for a zero change');
+  });
+
+  test('movement log: filters, pagination and CSV', async () => {
+    const all = await inv('/movements');
+    assert.equal(all.status, 200);
+    assert.ok(all.body.total >= 8);
+    assert.ok(all.body.movements.every((m, i, a) => i === 0 || a[i - 1].createdAt >= m.createdAt), 'newest first');
+    const byProduct = await inv(`/movements?product=${item._id}`);
+    assert.ok(byProduct.body.movements.length >= 8 && byProduct.body.movements.every((m) => m.product === String(item._id)));
+    assert.ok((await inv('/movements?reason=purchase')).body.movements.every((m) => m.reason === 'purchase'));
+    assert.equal((await inv('/movements?reason=bogus')).status, 400);
+    assert.equal((await inv('/movements?product=nope')).status, 400);
+    assert.equal((await inv('/movements?from=soon')).status, 400);
+    assert.equal((await inv('/movements?q=ledger')).body.movements.every((m) => /ledger/i.test(m.name)), true);
+    assert.equal((await inv('/movements?q=.*')).body.total, 0, 'search text is not a regex');
+    assert.equal((await inv('/movements?from=2001-01-01&to=2001-01-02')).body.total, 0);
+    assert.equal((await inv('/movements?limit=2')).body.movements.length, 2);
+    const csv = await api('/api/admin/inventory/movements?format=csv', { token: adminToken, raw: true });
+    assert.match(csv.headers.get('content-disposition'), /stock-movements\.csv/);
+    const lines = csv.body.replace(/^ï»¿/, '').split('\r\n');
+    assert.equal(lines[0], 'Date,SKU,Product,Change,Stock after,Reason,Note,By,Order,Supplier,Unit cost');
+    assert.ok(lines.some((l) => l.includes('Aero Parts Ltd') && l.includes('31.5')));
+  });
+
+  test('stock list: search, low / out filters, summary', async () => {
+    await Product.create([
+      { name: 'Almost Gone', brand: 'T', category: 'Toy Drones', description: 'd', price: 1, countInStock: 2 },
+      { name: 'Gone Entirely', brand: 'T', category: 'Toy Drones', description: 'd', price: 1, countInStock: 0 },
+    ]);
+    const low = await inv('/stock?filter=low');
+    assert.ok(low.body.products.length >= 1 && low.body.products.every((p) => p.countInStock > 0 && p.countInStock <= 5 && p.status === 'Low'));
+    const out = await inv('/stock?filter=out');
+    assert.ok(out.body.products.every((p) => p.countInStock === 0 && p.status === 'Out of stock'));
+    assert.deepEqual((await inv('/stock?q=gone%20entirely')).body.products.map((p) => p.name), ['Gone Entirely']);
+    const s = (await inv('/stock')).body.summary;
+    assert.equal(s.products, await Product.countDocuments());
+    assert.equal(s.units, (await Product.find()).reduce((n, p) => n + p.countInStock, 0));
+    assert.equal(s.out, await Product.countDocuments({ countInStock: 0 }));
+    assert.equal((await inv('/stock?limit=3')).body.products.length, 3);
+  });
+
+  test('suppliers: validation, duplicates, totals, deactivate, delete rules', async () => {
+    assert.equal((await inv('/suppliers', { method: 'POST', body: { name: '' } })).status, 400);
+    assert.equal((await inv('/suppliers', { method: 'POST', body: { name: 'Bad Mail', email: 'nope' } })).status, 400);
+    assert.equal((await inv('/suppliers', { method: 'POST', body: { name: 'Aero Parts Ltd' } })).status, 400, 'duplicate name');
+    const list = (await inv('/suppliers')).body;
+    const aero = list.find((s) => s.name === 'Aero Parts Ltd');
+    assert.deepEqual([aero.purchases, aero.unitsReceived], [1, 20]);
+    assert.equal((await inv(`/suppliers/${supplierId}`, { method: 'PUT', body: { phone: '999', active: false } })).body.active, false);
+    assert.equal((await inv(`/suppliers/${supplierId}`, { method: 'PUT', body: { phone: '999' } })).body.active, false, 'active kept when not sent');
+    assert.equal((await inv(`/suppliers/${supplierId}`, { method: 'DELETE' })).status, 400, 'has stock history');
+    const spare = await inv('/suppliers', { method: 'POST', body: { name: 'Spare Co' } });
+    assert.equal((await inv(`/suppliers/${spare.body._id}`, { method: 'DELETE' })).status, 200);
+    assert.equal((await inv('/suppliers/nope', { method: 'PUT', body: { name: 'x' } })).status, 404);
+  });
+});
+
+describe('order statuses, timeline and internal notes', () => {
+  let supportToken;
+  const setStatus = (id, status, token = adminToken) => api(`/api/orders/${id}/status`, { method: 'PUT', token, body: { status } });
+  const place = async () => (await order(aliceToken, [{ product: String(cheap._id), qty: 1 }])).body._id;
+
+  before(async () => {
+    await api('/api/admin/users', { method: 'POST', token: adminToken, body: { name: 'Nina Notes', email: 'nina@test.com', password: 'nina1234', role: 'support' } });
+    supportToken = (await api('/api/auth/login', { method: 'POST', body: { email: 'nina@test.com', password: 'nina1234' } })).body.token;
+  });
+
+  test('full lifecycle with a timeline; customers do not see who made a change', async () => {
+    const id = await place();
+    for (const s of ['Confirmed', 'Packed', 'Out for Delivery', 'Delivered']) {
+      const r = await setStatus(id, s, supportToken);
+      assert.equal(r.status, 200, s);
+      assert.equal(r.body.status, s);
+    }
+    assert.equal((await setStatus(id, 'Teleported')).status, 400);
+    const staff = (await api(`/api/orders/${id}`, { token: supportToken })).body;
+    assert.deepEqual(staff.statusHistory.map((h) => h.status), ['Processing', 'Confirmed', 'Packed', 'Out for Delivery', 'Delivered']);
+    assert.equal(staff.statusHistory[1].byName, 'Nina Notes');
+    assert.equal(staff.isPaid, true);
+    assert.ok(staff.deliveredAt);
+    const mine = (await api(`/api/orders/${id}`, { token: aliceToken })).body;
+    assert.deepEqual(mine.statusHistory.map((h) => Object.keys(h).sort()), mine.statusHistory.map(() => ['at', 'status']));
+    assert.equal(JSON.stringify(mine).includes('Nina'), false);
+  });
+
+  test('customers can cancel until the order is packed', async () => {
+    const a = await place();
+    await setStatus(a, 'Confirmed');
+    assert.equal((await api(`/api/orders/${a}/cancel`, { method: 'PUT', token: aliceToken })).status, 200);
+    const b = await place();
+    await setStatus(b, 'Packed');
+    assert.equal((await api(`/api/orders/${b}/cancel`, { method: 'PUT', token: aliceToken })).status, 400);
+    assert.equal((await setStatus(b, 'Cancelled')).body.status, 'Cancelled', 'staff can still cancel');
+    assert.equal((await setStatus(b, 'Packed')).status, 400, 'cancelled orders stay cancelled');
+  });
+
+  test('adding tracking ships an order from Confirmed or Packed', async () => {
+    const id = await place();
+    await setStatus(id, 'Packed');
+    const t = await api(`/api/orders/${id}/tracking`, { method: 'PUT', token: adminToken, body: { carrier: 'DHL', number: 'D1' } });
+    assert.equal(t.body.status, 'Shipped');
+    assert.equal(t.body.statusHistory.at(-1).status, 'Shipped');
+    const later = await place();
+    await setStatus(later, 'Out for Delivery');
+    const t2 = await api(`/api/orders/${later}/tracking`, { method: 'PUT', token: adminToken, body: { carrier: 'DHL', number: 'D2' } });
+    assert.equal(t2.body.status, 'Out for Delivery', 'tracking does not move an order backwards');
+  });
+
+  test('internal notes are staff-only everywhere customers can look', async () => {
+    const id = await place();
+    const add = (text, token = supportToken) => api(`/api/orders/${id}/notes`, { method: 'POST', token, body: { text } });
+    assert.equal((await add('Customer phoned about the gate code', aliceToken)).status, 403);
+    assert.equal((await add('   ')).status, 400);
+    assert.equal((await add('x'.repeat(1001))).status, 400);
+    const r = await add('  Customer phoned about the gate code  ');
+    assert.equal(r.status, 201);
+    assert.equal(r.body.notes.length, 1);
+    assert.deepEqual([r.body.notes[0].text, r.body.notes[0].byName], ['Customer phoned about the gate code', 'Nina Notes']);
+    await add('Left with neighbour', adminToken);
+
+    assert.equal((await api(`/api/orders/${id}`, { token: supportToken })).body.notes.length, 2);
+    for (const body of [
+      (await api(`/api/orders/${id}`, { token: aliceToken })).body,
+      (await api('/api/orders/mine', { token: aliceToken })).body,
+      (await api(`/api/orders/${id}/cancel`, { method: 'PUT', token: aliceToken })).body,
+    ]) assert.equal(JSON.stringify(body).includes('gate code'), false);
+    assert.equal(Object.hasOwn((await api(`/api/orders/${id}`, { token: aliceToken })).body, 'notes'), false);
+    assert.equal((await api('/api/orders', { token: supportToken })).body.find((o) => o._id === id).notes.length, 2, 'staff list includes notes');
+    assert.equal((await api(`/api/orders/${id}/notes`, { method: 'POST', token: bobToken, body: { text: 'hi' } })).status, 403);
+    assert.equal((await api(`/api/orders/${new mongoose.Types.ObjectId()}/notes`, { method: 'POST', token: adminToken, body: { text: 'hi' } })).status, 404);
   });
 });
 

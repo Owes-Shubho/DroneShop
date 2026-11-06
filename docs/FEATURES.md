@@ -28,8 +28,8 @@ What the shop does today. For the wider e-commerce checklist, including what is 
 
 - Register, sign in, profile, change password.
 - Forgot password: emailed link, one hour, single use.
-- Order history and order detail with status, tracking number and link.
-- Cancel an order while it is still processing (stock and coupon use are restored).
+- Order history and order detail with status, a progress timeline, tracking number and link.
+- Cancel an order until it is packed (stock and coupon use are restored).
 - Request a return within 30 days of delivery and follow its status.
 - Printable invoice (Print, then Save as PDF).
 - Wishlist page.
@@ -43,7 +43,8 @@ What the shop does today. For the wider e-commerce checklist, including what is 
 | Products | Add, edit, delete; SKU (generated if blank, unique); purchase cost and live margin; brand from the brand list; model number, part number, condition (New / Refurbished), warranty; technical attributes; main photo and up to 8 gallery photos; edit stock in place; filter by category, brand or stock; export CSV; import CSV matched by SKU | `products` |
 | Categories | Add, rename (products move with it), delete empty categories | `products` |
 | Brands | Add, edit (name, logo, description), rename (products move with it), delete unused brands; the shop can filter by brand | `products` |
-| Orders | Filter by status, change status, add carrier and tracking number (marks the order shipped), handle return requests (approve, reject, refund), export CSV | `orders` |
+| Orders | Filter by status, move an order through Processing, Confirmed, Packed, Shipped, Out for Delivery and Delivered, add carrier and tracking number (marks the order shipped), internal notes, packing slip, handle return requests (approve, reject, refund), export CSV | `orders` |
+| Inventory | Stock list with low / out-of-stock filters; record purchases from suppliers, damaged stock, supplier returns and count corrections; full stock log (every sale, cancellation, refund, import and adjustment with the stock level after it) with filters and CSV export; supplier list | `inventory` |
 | Coupons | Create, edit, switch on or off, delete | `coupons` |
 | Users | Search, filter by role and status, add users, edit profile, suspend or reinstate, send a password-reset link, delete; detail page with order totals, addresses and recent orders | `users.view`, `users.manage` |
 | Roles | Table of what each role can do and how many people hold it | `users.view` |
@@ -60,20 +61,20 @@ Roles are fixed in `server/utils/permissions.js`. The server checks them on ever
 |---|---|
 | Customer | Shop only |
 | Support | Orders, shipments, returns; look up users |
-| Manager | Support's access plus overview, reports, products, categories and coupons |
+| Manager | Support's access plus overview, reports, products, categories, inventory and coupons |
 | Admin | Everything, including users and roles |
 
 Safeguards: you cannot suspend, delete or change the role of your own account. A suspended account cannot sign in, and a session it already has open stops working. A role change shows up the next time the app loads, with no need to sign in again.
 
 ## Security and reliability
 
-- Passwords hashed with bcrypt; sign-in uses a signed token valid for 30 days.
+- Internal order notes are never sent to customers. Passwords hashed with bcrypt; sign-in uses a signed token valid for 30 days.
 - Rate limits: 600 requests per 15 minutes on the API, 20 per 15 minutes on sign-in, register and reset.
 - Security headers (helmet), 100 kb request size limit, input checks, and protection against clients setting fields they should not (for example a product's rating or reviews).
-- Orders reserve stock atomically, so the last units cannot be oversold; a failed order undoes any reservation.
+- Every change to stock is written to the stock log. Orders reserve stock atomically, so the last units cannot be oversold; a failed order undoes any reservation.
 - Image uploads limited to JPG, PNG and WebP up to 5 MB, with the file extension taken from the verified type.
 - CSV exports neutralise spreadsheet formulas. Tracking links must be http or https.
-- 49 automated API tests run against a separate `_test` database.
+- 73 automated API tests run against a separate `_test` database.
 
 ## Email
 

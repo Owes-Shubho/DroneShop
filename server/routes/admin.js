@@ -13,11 +13,14 @@ import { SKU_PATTERN } from '../models/Product.js';
 import { parseCsv } from '../utils/csvParse.js';
 import { csv, sendCsv } from '../utils/csvOut.js';
 import reportRoutes from './reports.js';
+import inventoryRoutes from './inventory.js';
+import { record } from '../utils/stock.js';
 import { protect, staff, requires } from '../middleware/auth.js';
 
 const router = Router();
 router.use(protect, staff);
 router.use('/reports', requires('reports'), reportRoutes);
+router.use('/inventory', requires('inventory'), inventoryRoutes);
 
 const LOW_STOCK = 5;
 
@@ -454,11 +457,14 @@ router.post('/import/products', requires('products'), async (req, res, next) => 
       try {
         const existing = sku ? await Product.findOne({ sku }) : await Product.findOne({ name: row.name, brand });
         if (existing) {
+          const before = existing.countInStock;
           existing.set({ name: row.name, ...data });
           await existing.save();
+          await record([{ product: existing._id, sku: existing.sku, name: existing.name, change: existing.countInStock - before, after: existing.countInStock }], { reason: 'import', user: req.user, note: 'CSV import' });
           result.updated++;
         } else {
-          await Product.create({ name: row.name, ...(sku ? { sku } : {}), ...data });
+          const created = await Product.create({ name: row.name, ...(sku ? { sku } : {}), ...data });
+          await record([{ product: created._id, sku: created.sku, name: created.name, change: created.countInStock, after: created.countInStock }], { reason: 'import', user: req.user, note: 'CSV import' });
           result.created++;
         }
       } catch (err) {

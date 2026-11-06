@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Product, { SKU_PATTERN } from '../models/Product.js';
 import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
+import { record } from '../utils/stock.js';
 import { protect, requires } from '../middleware/auth.js';
 
 const router = Router();
@@ -163,7 +164,9 @@ router.post('/', protect, requires('products'), async (req, res, next) => {
     const data = clean(req.body, res);
     await checkCategory(data, res);
     await checkBrand(data, res);
-    res.status(201).json(await Product.create(data));
+    const created = await Product.create(data);
+    await record([{ product: created._id, sku: created.sku, name: created.name, change: created.countInStock, after: created.countInStock }], { reason: 'initial', user: req.user, note: 'Product created' });
+    res.status(201).json(created);
   } catch (err) {
     next(skuTaken(err, res));
   }
@@ -174,6 +177,8 @@ router.put('/:id', protect, requires('products'), async (req, res, next) => {
     const data = clean(req.body, res);
     await checkCategory(data, res);
     await checkBrand(data, res);
+    // Stock edited on the product form or in the product list is logged as a correction.
+    const before = data.countInStock !== undefined && mongoose.isValidObjectId(req.params.id) ? await Product.findById(req.params.id).select('countInStock') : null;
     const product = await Product.findByIdAndUpdate(req.params.id, data, {
       new: true,
       runValidators: true,
@@ -181,6 +186,9 @@ router.put('/:id', protect, requires('products'), async (req, res, next) => {
     if (!product) {
       res.status(404);
       throw new Error('Product not found');
+    }
+    if (before && before.countInStock !== product.countInStock) {
+      await record([{ product: product._id, sku: product.sku, name: product.name, change: product.countInStock - before.countInStock, after: product.countInStock }], { reason: 'correction', user: req.user, note: 'Edited on the product form' });
     }
     res.json(product);
   } catch (err) {

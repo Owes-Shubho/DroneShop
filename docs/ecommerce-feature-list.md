@@ -60,14 +60,14 @@ A standard feature checklist for an online shop, with the current status of this
 
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
-| Order statuses (processing, shipped, delivered, cancelled) | ✅ | P1 | |
+| Order statuses (processing, confirmed, packed, shipped, out for delivery, delivered, cancelled) | ✅ | P1 | Status history timeline on every order |
 | Stock reduced on order, restored on cancel | ✅ | P1 | |
-| Customer self-service cancel | ✅ | P2 | While the order is still processing; restores stock and coupon use |
+| Customer self-service cancel | ✅ | P2 | Until the order is packed; restores stock and coupon use |
 | Shipment tracking number and carrier link | ✅ | P1 | Admin adds carrier, number and link; shown to the customer; marks the order shipped |
 | Invoice / receipt PDF | ✅ | P2 | Print-friendly invoice page; use Print → Save as PDF |
 | Returns and refunds workflow | ✅ | P2 | Customer requests within 30 days of delivery; admin approves, rejects or refunds (refund restocks). Money is not moved: there is no online payment yet |
 | Email / SMS notifications (confirmation, shipped) | 🟡 | P1 | Order placed, shipped, cancelled and password reset emails are built; they print to the server console until SMTP is set. No SMS |
-| Packing slip / label printing | ⬜ | P3 | |
+| Packing slip / label printing | 🟡 | P3 | Printable packing slip (no prices); no shipping labels |
 
 ## 5. Admin dashboard
 
@@ -106,7 +106,7 @@ A standard feature checklist for an online shop, with the current status of this
 | Feature | Status | Priority | Notes |
 |---|---|---|---|
 | Server-side validation and error messages | 🟡 | P1 | Checks on auth, orders, coupons, uploads; no schema validation library |
-| Automated tests (API and UI) | 🟡 | P1 | 59 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles, reports); no UI tests |
+| Automated tests (API and UI) | 🟡 | P1 | 73 API tests (pricing, auth, accounts, orders, coupons, admin, categories, cart, returns, import, users and roles, reports); no UI tests |
 | Image optimisation and CDN | ⬜ | P2 | Images are served as uploaded |
 | Cloud file storage for uploads | ⬜ | P1 | Needed once the server is not a single machine |
 | Environment config and secrets | ✅ | P1 | `.env`, git-ignored |

@@ -34,6 +34,10 @@ const orderSchema = new mongoose.Schema(
       resolvedAt: Date,
     },
     isRefunded: { type: Boolean, default: false },
+    // Every status the order has been in, oldest first (the activity timeline).
+    statusHistory: [{ _id: false, status: String, at: Date, by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, byName: String }],
+    // Internal staff notes. Never sent to customers (see view() in routes/orders.js).
+    notes: [{ text: { type: String, required: true, maxlength: 1000 }, by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, byName: String, at: Date }],
     cancelledBy: { type: String, enum: ['customer', 'admin'] },
     itemsPrice: { type: Number, required: true },
     shippingPrice: { type: Number, required: true },
@@ -43,7 +47,7 @@ const orderSchema = new mongoose.Schema(
     paidAt: Date,
     status: {
       type: String,
-      enum: ['Processing', 'Shipped', 'Delivered', 'Cancelled'],
+      enum: ['Processing', 'Confirmed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'],
       default: 'Processing',
     },
   },

@@ -4,7 +4,7 @@ import { api, money, download } from '../../api.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { Loader, ErrorMsg } from '../../components/Bits.jsx';
 
-const statuses = ['Processing', 'Shipped', 'Delivered', 'Cancelled'];
+const statuses = ['Processing', 'Confirmed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'];
 
 export default function AdminOrders() {
   const { user } = useAuth();
@@ -85,7 +85,7 @@ export default function AdminOrders() {
             {rows.length === 0 && <tr><td colSpan="9" className="muted">No orders.</td></tr>}
             {rows.map((o) => (
               <tr key={o._id}>
-                <td><Link to={`/orders/${o._id}`}>{o._id.slice(-8)}</Link></td>
+                <td><Link to={`/orders/${o._id}`}>{o._id.slice(-8)}</Link>{o.notes?.length > 0 && <small className="muted" title="Internal notes"> ✎{o.notes.length}</small>}<br /><Link to={`/orders/${o._id}/packing-slip`} className="small-link">Packing slip</Link></td>
                 <td>{o.user?.name || 'Deleted user'}<br /><small className="muted">{o.user?.email}</small></td>
                 <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                 <td>{o.items.reduce((s, i) => s + i.qty, 0)}</td>

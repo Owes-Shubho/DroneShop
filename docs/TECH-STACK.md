@@ -37,10 +37,10 @@ server/
   server.js          starts the API (loads .env, connects to MongoDB)
   app.js             builds the Express app (also used by the tests)
   seed.js            loads sample data
-  models/            User, Product, Order, Coupon, Category, Brand
-  routes/            auth, account, products, categories, brands, orders, admin, reports, upload, seo
+  models/            User, Product, Order, Coupon, Category, Brand, StockMovement, Supplier
+  routes/            auth, account, products, categories, brands, orders, admin, inventory, reports, upload, seo
   middleware/        auth (protect, staff, requires, admin), error handling
-  utils/             pricing, permissions, mailer, csvOut, csvParse, catalogue
+  utils/             pricing, permissions, mailer, csvOut, csvParse, catalogue, stock
   tests/             api.test.js
 ```
 
@@ -52,7 +52,9 @@ server/
 | `products` | name, unique SKU, brand, category, description, image and gallery, price, purchase cost (staff only), stock, condition, warranty, model and part number, specs and free-form attributes, embedded reviews, rating |
 | `categories` | name (unique) |
 | `brands` | name (unique), logo, description |
-| `orders` | user, item snapshot (name, image, price, quantity), shipping address, payment method, coupon, totals, tracking, status, return request, refund flag |
+| `stockmovements` | one row per stock change: product and SKU snapshot, signed change, stock after, reason, note, who, order, supplier, unit cost. Rows are never edited |
+| `suppliers` | name (unique), contact, email, phone, address, notes, active flag |
+| `orders` | user, item snapshot (name, SKU, image, price, quantity), shipping address, payment method, coupon, totals, tracking, status and status history, internal notes, return request, refund flag |
 | `coupons` | code, type (percent or fixed), value, minimum order, expiry, usage limit and count, active flag |
 
 ### API areas
@@ -66,6 +68,7 @@ server/
 | `/api/brands` | public list; admin add, edit, rename, delete |
 | `/api/orders` | price quote, create, my orders, detail, cancel, return request; staff list, status, tracking, return decision |
 | `/api/admin` | stats, users and roles, coupons, CSV import and export |
+| `/api/admin/inventory` | stock list, adjust stock, stock log (JSON or CSV), suppliers |
 | `/api/admin/reports` | sales, products, categories, customers, inventory, coupons, returns (JSON or CSV) |
 | `/api/upload` | product image upload |
 | `/robots.txt`, `/sitemap.xml` | SEO |
@@ -77,6 +80,8 @@ server/
 - **Role permissions.** `utils/permissions.js` maps roles to permissions. Routes use `requires('<permission>')` from `middleware/auth.js`. The older `isAdmin` flag stays authoritative for admins.
 - **Purchase cost is staff-only.** `costPrice` is excluded from every query by default (`select: false`) and only the staff edit form, the product CSV export and the inventory report ask for it.
 - **SKU.** Unique and upper-cased; the model generates one (brand prefix + random hex) when a product is created without it. `utils/catalogue.js` gives older data brands and SKUs at server start.
+- **Stock log.** Every stock change goes through `utils/stock.js`: an atomic conditional update (never below zero) that returns the new level, and a log row written once the surrounding operation has succeeded, so a rejected order leaves no trace. Orders, cancellations, refunds, product edits, CSV imports and manual adjustments all log.
+- **Internal order notes.** Stored on the order but removed from every customer-facing response by one `view()` function in `routes/orders.js`; the same function hides which staff member changed a status.
 - **Reports.** One route builds each report as columns, rows and a summary with MongoDB aggregations; the same data feeds the screen and the CSV.
 - **Testability.** `app.js` exports the app without listening, so tests call it over HTTP with a throwaway port; rate limiting is switched off when `NODE_ENV=test`.
 
@@ -116,7 +121,7 @@ client/src/
 
 - **Package manager:** npm, with a root `package.json` for shortcuts (`install:all`, `seed`, `server`, `client`).
 - **Module system:** ES modules on both sides.
-- **Tests:** `npm test --prefix server` runs 59 integration tests against `droneshop_test`. The tests refuse to run on a database whose name does not end in `_test`.
+- **Tests:** `npm test --prefix server` runs 73 integration tests against `droneshop_test`. The tests refuse to run on a database whose name does not end in `_test`.
 - **Version control:** Git; commits carry the project owner's identity only.
 - **Assets:** product photos from Wikimedia Commons in `client/public/images/drones/`, credits in `CREDITS.md`; the design system reference is `assets/DESIGN-dji.md`.
 

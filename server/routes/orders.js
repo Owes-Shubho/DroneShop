@@ -7,9 +7,13 @@ import { protect, requires } from '../middleware/auth.js';
 import { totals, couponProblem } from '../utils/pricing.js';
 import { mail } from '../utils/mailer.js';
 import { can } from '../utils/permissions.js';
+import { changeStock, record } from '../utils/stock.js';
 
 const router = Router();
-const STATUSES = ['Processing', 'Shipped', 'Delivered', 'Cancelled'];
+// Order of the shop-floor flow. Staff can move an order to any status except out of Cancelled.
+const STATUSES = ['Processing', 'Confirmed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'];
+const CUSTOMER_CANCELLABLE = ['Processing', 'Confirmed'];
+const NOT_YET_SHIPPED = ['Processing', 'Confirmed', 'Packed'];
 const ADDRESS_FIELDS = ['fullName', 'address', 'city', 'postalCode', 'country'];
 const PAYMENT_METHODS = ['Cash on Delivery', 'Card on Delivery'];
 
@@ -17,6 +21,16 @@ const fail = (res, status, message) => {
   res.status(status);
   return new Error(message);
 };
+
+// Orders as shown to a viewer: internal notes are staff-only, and customers do not see which staff member made a change.
+function view(order, viewer) {
+  const o = order.toObject ? order.toObject() : { ...order };
+  if (!can(viewer, 'orders')) {
+    delete o.notes;
+    o.statusHistory = (o.statusHistory || []).map(({ status, at }) => ({ status, at }));
+  }
+  return o;
+}
 
 /** Validates the cart against the database and returns trusted line items (price and name come from the DB). */
 async function buildItems(items, res) {
@@ -45,26 +59,37 @@ async function findCoupon(code, subtotal, res) {
 const subtotalOf = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);
 
 // Atomically decrement stock; undo the ones already taken if a later one fails.
+// Returns movement entries to log once the order exists.
 async function claimStock(orderItems, res) {
   const done = [];
   for (const it of orderItems) {
-    const r = await Product.updateOne({ _id: it.product, countInStock: { $gte: it.qty } }, { $inc: { countInStock: -it.qty } });
-    if (!r.modifiedCount) {
-      await releaseStock(done);
+    const moved = await changeStock(it.product, -it.qty);
+    if (!moved) {
+      await releaseStock(done.map((d) => ({ product: d.product, qty: -d.change })));
       throw fail(res, 400, `Not enough stock for ${it.name}`);
     }
-    done.push(it);
+    done.push({ product: it.product, change: -it.qty, ...moved });
   }
+  return done;
 }
+// Puts items back in stock and returns movement entries (not logged here).
 const releaseStock = (items) =>
-  Promise.all(items.map((it) => Product.updateOne({ _id: it.product }, { $inc: { countInStock: it.qty } })));
+  Promise.all(items.map(async (it) => ({ product: it.product, change: it.qty, ...(await changeStock(it.product, it.qty)) }))).then((rows) =>
+    rows.filter((r) => r.after !== undefined)
+  );
 
-async function cancelOrder(order, by) {
-  await releaseStock(order.items);
+const setStatus = (order, status, actor) => {
+  order.status = status;
+  order.statusHistory.push({ status, at: new Date(), by: actor?._id, byName: actor?.name });
+};
+
+async function cancelOrder(order, by, actor) {
+  const back = await releaseStock(order.items);
   if (order.coupon?.code) await Coupon.updateOne({ code: order.coupon.code, usedCount: { $gt: 0 } }, { $inc: { usedCount: -1 } });
-  order.status = 'Cancelled';
+  setStatus(order, 'Cancelled', actor);
   order.cancelledBy = by;
   await order.save();
+  await record(back, { reason: 'cancellation', order: order._id, user: actor, note: `Order ${String(order._id).slice(-8)} cancelled by ${by}` });
   const user = await User.findById(order.user);
   if (user) mail.orderCancelled(user, order);
 }
@@ -85,9 +110,8 @@ router.post('/quote', protect, async (req, res, next) => {
 });
 
 router.post('/', protect, async (req, res, next) => {
-  let claimed = false;
+  let claimed = null;
   let couponClaimed = null;
-  let orderItems;
   try {
     const { shippingAddress, paymentMethod, couponCode } = req.body;
     if (!shippingAddress || ADDRESS_FIELDS.some((k) => typeof shippingAddress[k] !== 'string' || !shippingAddress[k].trim())) {
@@ -95,12 +119,11 @@ router.post('/', protect, async (req, res, next) => {
     }
     if (paymentMethod && !PAYMENT_METHODS.includes(paymentMethod)) throw fail(res, 400, 'Unsupported payment method');
 
-    orderItems = await buildItems(req.body.items, res);
+    const orderItems = await buildItems(req.body.items, res);
     const subtotal = subtotalOf(orderItems);
     const coupon = await findCoupon(couponCode, subtotal, res);
 
-    await claimStock(orderItems, res);
-    claimed = true;
+    claimed = await claimStock(orderItems, res);
 
     if (coupon) {
       const filter = { _id: coupon._id, active: true, ...(coupon.usageLimit ? { usedCount: { $lt: coupon.usageLimit } } : {}) };
@@ -115,13 +138,17 @@ router.post('/', protect, async (req, res, next) => {
       shippingAddress: Object.fromEntries(ADDRESS_FIELDS.map((k) => [k, shippingAddress[k].trim()])),
       paymentMethod: paymentMethod || 'Cash on Delivery',
       coupon: coupon ? { code: coupon.code, type: coupon.type, value: coupon.value } : undefined,
+      statusHistory: [{ status: 'Processing', at: new Date(), by: req.user._id, byName: req.user.name }],
       ...totals(subtotal, coupon),
     });
+    const entries = claimed;
+    claimed = null; // the order exists now: the reservation stays
+    await record(entries, { reason: 'sale', order: order._id, user: req.user, note: `Order ${String(order._id).slice(-8)}` });
     mail.orderPlaced(req.user, order);
-    res.status(201).json(order);
+    res.status(201).json(view(order, req.user));
   } catch (err) {
     // Undo any reservation made before the failure.
-    if (claimed) await releaseStock(orderItems).catch(() => {});
+    if (claimed) await releaseStock(claimed.map((d) => ({ product: d.product, qty: -d.change }))).catch(() => {});
     if (couponClaimed) await Coupon.updateOne({ _id: couponClaimed }, { $inc: { usedCount: -1 } }).catch(() => {});
     next(err);
   }
@@ -129,7 +156,8 @@ router.post('/', protect, async (req, res, next) => {
 
 router.get('/mine', protect, async (req, res, next) => {
   try {
-    res.json(await Order.find({ user: req.user._id }).sort({ createdAt: -1 }));
+    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+    res.json(orders.map((o) => view(o, req.user)));
   } catch (err) {
     next(err);
   }
@@ -147,20 +175,20 @@ router.get('/:id', protect, async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id).populate('user', 'name email');
     if (!order || (!can(req.user, 'orders') && !order.user?._id.equals(req.user._id))) throw fail(res, 404, 'Order not found');
-    res.json(order);
+    res.json(view(order, req.user));
   } catch (err) {
     next(err);
   }
 });
 
-// Customers can cancel their own order until it ships.
+// Customers can cancel their own order until it is packed.
 router.put('/:id/cancel', protect, async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order || !order.user.equals(req.user._id)) throw fail(res, 404, 'Order not found');
-    if (order.status !== 'Processing') throw fail(res, 400, 'Only orders that are still processing can be cancelled');
-    await cancelOrder(order, 'customer');
-    res.json(order);
+    if (!CUSTOMER_CANCELLABLE.includes(order.status)) throw fail(res, 400, 'Only orders that have not been packed yet can be cancelled');
+    await cancelOrder(order, 'customer', req.user);
+    res.json(view(order, req.user));
   } catch (err) {
     next(err);
   }
@@ -181,7 +209,7 @@ router.post('/:id/return', protect, async (req, res, next) => {
     if (reason.length < 5 || reason.length > 500) throw fail(res, 400, 'Tell us why you are returning it (5–500 characters)');
     order.returnRequest = { reason, status: 'Requested', requestedAt: new Date() };
     await order.save();
-    res.status(201).json(order);
+    res.status(201).json(view(order, req.user));
   } catch (err) {
     next(err);
   }
@@ -197,14 +225,16 @@ router.put('/:id/return', protect, requires('orders'), async (req, res, next) =>
     const { decision } = req.body;
     const allowed = { Requested: ['approve', 'reject', 'refund'], Approved: ['refund'] }[rr.status] || [];
     if (!allowed.includes(decision)) throw fail(res, 400, `A ${rr.status.toLowerCase()} return cannot be ${decision}d`);
+    let back = [];
     if (decision === 'refund') {
-      await releaseStock(order.items);
+      back = await releaseStock(order.items);
       order.isRefunded = true;
     }
     rr.status = { approve: 'Approved', reject: 'Rejected', refund: 'Refunded' }[decision];
     rr.resolvedAt = new Date();
     if (typeof req.body.note === 'string') rr.note = req.body.note.trim().slice(0, 500);
     await order.save();
+    await record(back, { reason: 'refund', order: order._id, user: req.user, note: `Order ${String(order._id).slice(-8)} refunded` });
     res.json(order);
   } catch (err) {
     next(err);
@@ -221,10 +251,10 @@ router.put('/:id/status', protect, requires('orders'), async (req, res, next) =>
     if (status === order.status) return res.json(order);
 
     if (status === 'Cancelled') {
-      await cancelOrder(order, 'admin');
+      await cancelOrder(order, 'admin', req.user);
       return res.json(order);
     }
-    order.status = status;
+    setStatus(order, status, req.user);
     if (status === 'Shipped') order.shippedAt = new Date();
     if (status === 'Delivered') {
       order.deliveredAt = new Date();
@@ -244,7 +274,7 @@ router.put('/:id/status', protect, requires('orders'), async (req, res, next) =>
   }
 });
 
-// Saves carrier and tracking number; a processing order is marked as shipped and the customer is emailed.
+// Saves carrier and tracking number; an order that has not shipped yet is marked as shipped and the customer is emailed.
 router.put('/:id/tracking', protect, requires('orders'), async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -254,9 +284,9 @@ router.put('/:id/tracking', protect, requires('orders'), async (req, res, next) 
     if (!String(number).trim()) throw fail(res, 400, 'A tracking number is required');
     if (url && !/^https?:\/\//i.test(url)) throw fail(res, 400, 'Tracking URL must start with http:// or https://');
     order.tracking = { carrier: String(carrier).trim(), number: String(number).trim(), url: String(url).trim() };
-    const becameShipped = order.status === 'Processing';
+    const becameShipped = NOT_YET_SHIPPED.includes(order.status);
     if (becameShipped) {
-      order.status = 'Shipped';
+      setStatus(order, 'Shipped', req.user);
       order.shippedAt = new Date();
     }
     await order.save();
@@ -265,6 +295,22 @@ router.put('/:id/tracking', protect, requires('orders'), async (req, res, next) 
       if (user) mail.orderShipped(user, order);
     }
     res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Internal notes: visible to staff only, never edited or removed.
+router.post('/:id/notes', protect, requires('orders'), async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) throw fail(res, 404, 'Order not found');
+    const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+    if (!text || text.length > 1000) throw fail(res, 400, 'Write a note of up to 1000 characters');
+    if (order.notes.length >= 100) throw fail(res, 400, 'This order has reached the limit of 100 notes');
+    order.notes.push({ text, by: req.user._id, byName: req.user.name, at: new Date() });
+    await order.save();
+    res.status(201).json(order);
   } catch (err) {
     next(err);
   }

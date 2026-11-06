@@ -12,6 +12,9 @@ export async function api(path, { method = 'GET', body, token } = {}) {
   return data;
 }
 
+// Status names contain spaces ("Out for Delivery"); this makes one CSS class from them.
+export const statusClass = (s) => String(s).replace(/\s+/g, '-');
+
 export const money = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 

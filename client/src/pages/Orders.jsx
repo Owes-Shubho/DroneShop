@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, money } from '../api.js';
+import { api, money, statusClass } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Loader, ErrorMsg } from '../components/Bits.jsx';
 import useTitle from '../useTitle.js';
@@ -29,7 +29,7 @@ export function MyOrders() {
                 <td>{o._id.slice(-8)}</td>
                 <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                 <td>{money(o.totalPrice)}</td>
-                <td><span className={`badge ${o.status}`}>{o.status}</span></td>
+                <td><span className={`badge ${statusClass(o.status)}`}>{o.status}</span></td>
                 <td><Link to={`/orders/${o._id}`}>Details</Link></td>
               </tr>
             ))}
@@ -42,7 +42,8 @@ export function MyOrders() {
 
 export function OrderDetail() {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const [note, setNote] = useState('');
   const [o, setO] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,7 +84,23 @@ export function OrderDetail() {
     }
   };
 
+  const addNote = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await api(`/orders/${id}/notes`, { method: 'POST', token: user.token, body: { text: note } });
+      setO((cur) => ({ ...cur, notes: updated.notes }));
+      setNote('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!o) return error ? <ErrorMsg error={error} /> : <Loader />;
+  const staff = can('orders');
   const a = o.shippingAddress;
   const rr = o.returnRequest;
   const mine = o.user?._id === user._id;
@@ -96,7 +113,8 @@ export function OrderDetail() {
         <h1>Order {o._id.slice(-8)}</h1>
         <div className="row gap">
           <Link to={`/orders/${o._id}/invoice`} className="btn ghost small">Invoice</Link>
-          {o.status === 'Processing' && mine && (
+          {staff && <Link to={`/orders/${o._id}/packing-slip`} className="btn ghost small">Packing slip</Link>}
+          {['Processing', 'Confirmed'].includes(o.status) && mine && (
             <button className="btn ghost small" onClick={cancel} disabled={busy}>Cancel order</button>
           )}
           {o.status === 'Delivered' && mine && !rr?.status && !asking && (
@@ -105,7 +123,32 @@ export function OrderDetail() {
         </div>
       </div>
       <ErrorMsg error={error} />
-      <p><span className={`badge ${o.status}`}>{o.status}</span> · Placed {new Date(o.createdAt).toLocaleString()}</p>
+      <p><span className={`badge ${statusClass(o.status)}`}>{o.status}</span> · Placed {new Date(o.createdAt).toLocaleString()}</p>
+
+      {o.statusHistory?.length > 0 && (
+        <div className="panel">
+          <h3>Order progress</h3>
+          <ul className="timeline">
+            {o.statusHistory.map((h, i) => (
+              <li key={i}><strong>{h.status}</strong> <span className="muted">{new Date(h.at).toLocaleString()}{staff && h.byName ? ` · ${h.byName}` : ''}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {staff && (
+        <div className="panel">
+          <h3>Internal notes <small className="muted">(staff only, customers never see these)</small></h3>
+          {(o.notes || []).length === 0 && <p className="muted">No notes yet.</p>}
+          {(o.notes || []).map((n, i) => (
+            <div key={i} className="note">{n.text}<br /><small>{n.byName || 'Staff'} · {new Date(n.at).toLocaleString()}</small></div>
+          ))}
+          <form onSubmit={addNote} className="form">
+            <textarea required maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note for the team" aria-label="New internal note" />
+            <button className="btn small" disabled={busy}>Add note</button>
+          </form>
+        </div>
+      )}
 
       {asking && (
         <form className="panel pform-inline" onSubmit={requestReturn}>

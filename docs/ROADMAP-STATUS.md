@@ -9,7 +9,7 @@ The project was built feature by feature rather than phase by phase, so it is ah
 | Phase | Theme | Status |
 |---|---|---|
 | 1 | Core e-commerce | Almost done. Missing: store settings page, a real contact form |
-| 2 | Business management | About half done. Catalogue basics (SKU, cost, brands, drone fields, SKU import) are in. Missing: variants, compatibility, inventory history, suppliers, shipping zones, online payment, Excel import |
+| 2 | Business management | More than half done. Catalogue basics, inventory log, suppliers and the full order flow are in. Missing: variants, compatibility, shipping zones, online payment, Excel import |
 | 3 | Advanced e-commerce and reporting | About half done. Reports, wishlist, compare, related and recently viewed are in; profit, Q&A, newsletter, banners, abandoned cart, notifications are not |
 | 4 | Security, production, enterprise | Roles and the basic security layer are in; audit log, refresh tokens, backups, Docker, CI, monitoring and the drone-specific tools are not |
 
@@ -53,16 +53,16 @@ The project was built feature by feature rather than phase by phase, so it is ah
 | Drone-specific specifications | ✅ | Four fixed fields plus free-form attributes (Motor KV, battery capacity, propeller size, ...), model number, part number, condition, warranty |
 | Compatibility management | ⬜ | |
 | SKU, purchase cost, margin | ✅ | Unique SKU (generated if blank), cost visible to staff only, margin shown on the product form. Barcode not built |
-| Inventory tracking, adjustments, low-stock alerts | 🟡 | Stock count, edit in place, low-stock list; no reason codes or alerts |
-| Inventory movement log, suppliers | ⬜ | |
+| Inventory tracking, adjustments, low-stock list | ✅ | Stock list, adjustments with reasons, low / out filters. No per-product minimum or alert emails |
+| Inventory movement log, suppliers | ✅ | Every change logged with the stock after it; CSV export. Suppliers can be attached to purchases and returns; no purchase orders |
 | CSV import and export | ✅ | Matches by SKU (or name + brand when there is no SKU); optional cost, model, condition, warranty and spec: columns; per-row error report |
 | Excel import and export | ⬜ | |
 | Duplicate-SKU check | ✅ | Inside the file and against existing products |
 | Import template, preview, history, rollback | ⬜ | Valid rows are applied immediately; invalid rows are skipped and listed |
 | Bulk price and stock updates | 🟡 | Possible through a CSV update |
 | Order flow: cancel, tracking, invoice | ✅ | |
-| Order confirmation step, packed / out-for-delivery statuses | ⬜ | Statuses are Processing, Shipped, Delivered, Cancelled |
-| Packing slips, internal order notes | ⬜ | |
+| Order confirmation step, packed / out-for-delivery statuses | ✅ | Processing, Confirmed, Packed, Shipped, Out for Delivery, Delivered, Cancelled, with a timeline |
+| Packing slips, internal order notes | ✅ | Notes are staff-only and never reach customers |
 | Separate payment status | 🟡 | A paid flag on the order |
 | Returns and refunds | ✅ | Request, approve, reject, refund with restock; no money moves |
 | Multiple addresses, suspend / reinstate customers | ✅ | |
@@ -108,7 +108,7 @@ The project was built feature by feature rather than phase by phase, so it is ah
 | Drone tools: compatibility database / checker, builder, manuals | ⬜ | Comparison exists |
 | Integrations: gateways, courier, SMS, analytics, cloud storage | ⬜ | |
 | Docker, Nginx, CI/CD, monitoring, load testing | ⬜ | |
-| Automated tests | 🟡 | 59 API tests; no browser tests |
+| Automated tests | 🟡 | 73 API tests; no browser tests |
 
 ## Business rules check
 
@@ -129,7 +129,7 @@ The project was built feature by feature rather than phase by phase, so it is ah
 ## Suggested order for the rest
 
 1. **Catalogue foundation (Phase 2): done.** SKU, purchase cost, brand management, drone specification fields and SKU-based import are in.
-2. **Inventory and orders:** stock movement log with reasons, supplier list, extra order statuses and notes, packing slip.
+2. **Inventory and orders: done.** Stock log, suppliers, extra order statuses, notes and packing slip are in. Still open here: per-product minimum stock and alerts, purchase orders, batch / serial tracking.
 3. **Shipping and store settings:** shipping zones and charges, tax, currency and store details editable in the dashboard instead of code.
 4. **Compatibility:** which drone models a battery, motor or propeller fits, shown on the product page.
 5. **Payments:** gateway integration once there is an account (needs keys, webhooks, and a decision on bKash / Nagad / SSLCommerz or card).
